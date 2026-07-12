@@ -56,6 +56,34 @@ Expo Router のルート画面を配置します。
 - `formPhotoAdviceResults`
 - `boardReferenceImages`
 
+`GameDatabaseContext.tsx` はゲーム領域のSQLite接続とRepository入口を提供します。
+
+公開する状態:
+
+- DB初期化中か
+- DB利用可能か
+- 初期化エラー
+- `PlayerRepository` / `MatchRepository` / `GameRepository` / `RatingRepository` / `IntegrationOutboxRepository`
+
+`AppStateContext` へ投擲履歴やMATCH履歴を混在させません。ゲームの正本は `dartsapp_games.db` のSQLite、既存MVP状態の正本はAsyncStorageです。
+
+## features/game/
+
+ゲーム機能は画面から分離し、次のレイヤーに分けます。
+
+- `domain/`: enum値、ドメイン型、ID生成、ゲーム領域エラー
+- `application/`: Repository port
+- `infrastructure/sqlite/`: DB初期化、migration、Repository実装、row mapper
+
+Phase 1では画面実装へ進まず、後続フェーズで使う保存基盤とRepository境界だけを接続しています。
+
+SQLite DB:
+
+- ファイル名: `dartsapp_games.db`
+- migration: `PRAGMA user_version` と `db_migrations`
+- v1: 19テーブル、Outbox、投擲の `client_action_id` 冪等制約、進行中GAME/MATCHの一意制約
+- SQL正本: `docs/specs/DartsApp_DB_v1_schema.sql`
+
 ## utils/
 
 画面から分離したロジックです。

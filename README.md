@@ -27,6 +27,7 @@ MVP v0.1 では実データ連携やAI連携は行わず、端末内ローカル
 - Expo Router
 - React Context
 - AsyncStorage
+- expo-sqlite
 - Node.js built-in test runner
 - ESLint / Prettier
 
@@ -161,6 +162,29 @@ npm test
 npm run validate:data
 ```
 
+## Game Database Foundation
+
+Phase 1では、後続のCOUNT-UP / 01 / CRICKET / MATCH実装に向けたSQLiteゲーム基盤を追加しています。
+
+- DBファイル名: `dartsapp_games.db`
+- 保存方式: `expo-sqlite`
+- migration管理: `PRAGMA user_version` と `db_migrations`
+- v1 migration: `features/game/infrastructure/sqlite/migrations/001_initial.ts`
+- SQL正本: `docs/specs/DartsApp_DB_v1_schema.sql`
+
+DB初期化時に以下を適用します。
+
+```sql
+PRAGMA journal_mode = WAL;
+PRAGMA foreign_keys = ON;
+PRAGMA synchronous = NORMAL;
+PRAGMA busy_timeout = 5000;
+```
+
+ゲーム領域の正本はSQLiteです。既存プロフィール、練習記録、写真スコア、相談履歴、表示設定は引き続きAsyncStorageの `AppState` に保持します。SQLiteから既存PracticeRecordへ反映する将来連携は `integration_outbox` を境界にします。
+
+Phase 1ではゲーム画面は未実装です。`/game`、COUNT-UP、01、CRICKET、MATCH、Rating表示画面は次フェーズ以降で実装します。
+
 ## App identity
 
 - App name: `DartsSupportApp`
@@ -192,6 +216,8 @@ npm run validate:data
 - `docs/MVP_FEATURES.md`
 - `docs/ROUTES.md`
 - `docs/ARCHITECTURE.md`
+- `docs/implementation/PHASE_1_REPORT.md`
+- `docs/implementation/OPEN_QUESTIONS.md`
 - `docs/EAS_BUILD_GUIDE.md`
 - `docs/TESTFLIGHT_PREP.md`
 - `docs/APP_STORE_METADATA_DRAFT.md`
