@@ -1,0 +1,8 @@
+node_modules
+.expo
+dist
+coverage
+package-lock.json
+*.log
+darts_training_app_screen_prompts.md
+deep-research-report.md

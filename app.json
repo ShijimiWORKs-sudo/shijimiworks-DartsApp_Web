@@ -1,0 +1,44 @@
+{
+  "expo": {
+    "name": "DartsSupportApp",
+    "slug": "darts-support-app",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
+    "scheme": "dartssupportapp",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/images/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#eef1f3"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.shijimiworks.dartssupportapp",
+      "buildNumber": "1",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSCameraUsageDescription": "ダーツボード写真を撮影して、タップした刺さり位置からスコアを記録するためにカメラを使用します。",
+        "NSPhotoLibraryUsageDescription": "保存済みのダーツボード写真を選択して、タップした刺さり位置からスコアを記録するために写真ライブラリを使用します。"
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/images/icon.png",
+        "backgroundColor": "#eef1f3"
+      }
+    },
+    "web": {
+      "favicon": "./assets/images/icon.png"
+    },
+    "plugins": ["expo-router", "expo-sqlite"],
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "7beb2425-048c-4a04-83ee-59846a446108"
+      }
+    },
+    "owner": "shijimiworks"
+  }
+}
