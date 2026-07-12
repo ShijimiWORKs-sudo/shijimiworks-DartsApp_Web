@@ -32,7 +32,7 @@
     "web": {
       "favicon": "./assets/images/icon.png"
     },
-    "plugins": ["expo-router"],
+    "plugins": ["expo-router", "expo-sqlite"],
     "extra": {
       "router": {},
       "eas": {
