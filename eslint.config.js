@@ -6,4 +6,9 @@ module.exports = defineConfig([
   {
     ignores: ['dist/*', '.expo/*', 'node_modules/*'],
   },
+  {
+    rules: {
+      'import/namespace': 'off',
+    },
+  },
 ]);
