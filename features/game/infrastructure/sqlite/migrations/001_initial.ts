@@ -3,8 +3,7 @@ import type { GameDatabaseExecutor } from '../types';
 export const INITIAL_GAME_DATABASE_VERSION = 1;
 export const INITIAL_GAME_DATABASE_NAME = '001_initial_game_database';
 
-// Generated from docs/specs/DartsApp_DB_v1_schema.sql, with one Phase 1 delta:
-// uq_matches_active enforces the implementation instruction that active MATCH is also device-unique.
+// Synchronized with docs/specs/DartsApp_DB_v1_schema.sql for Game Database v1.
 export const INITIAL_GAME_DATABASE_SQL = String.raw`
 CREATE TABLE IF NOT EXISTS db_migrations (
   version INTEGER PRIMARY KEY,
@@ -59,7 +58,8 @@ CREATE TABLE IF NOT EXISTS matches (
 
 CREATE UNIQUE INDEX IF NOT EXISTS uq_matches_active
 ON matches ((1))
-WHERE status IN ('in_progress', 'paused') AND deleted_at IS NULL;
+WHERE status IN ('in_progress', 'paused')
+  AND deleted_at IS NULL;
 
 CREATE TABLE IF NOT EXISTS match_players (
   match_id TEXT NOT NULL REFERENCES matches(id) ON DELETE CASCADE,

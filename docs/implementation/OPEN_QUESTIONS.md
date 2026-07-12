@@ -1,9 +1,10 @@
 # Open Questions
 
-## 1. Active MATCH uniqueness
+現在、Phase 1に関する未解決事項はありません。
 
-`docs/specs/DartsApp_DB_v1_schema.sql` には進行中GAMEを端末内1件に制限する `uq_game_sessions_single_active` がありますが、進行中MATCHを端末内1件に制限する部分インデックスはありません。
+## 解決済み: Active MATCH uniqueness
 
-一方、Phase 1指示のテスト要件には「進行中GAME / MATCHの一意制約が機能する」とあります。
-
-Phase 1実装では、指示要件を満たすためにmigrationへ `uq_matches_active` を追加しました。SQL正本へ同制約を追記するか、実装側の補助制約として維持するか確認が必要です。
+- `uq_matches_active`を正式仕様として採用
+- `docs/specs/DartsApp_DB_v1_schema.sql`へ反映済み
+- `docs/specs/DartsApp_DB設計書_v1.0.md`へ反映済み
+- migrationと仕様書の差分は解消済み

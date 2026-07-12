@@ -59,6 +59,11 @@ CREATE TABLE IF NOT EXISTS matches (
   deleted_at TEXT
 );
 
+CREATE UNIQUE INDEX IF NOT EXISTS uq_matches_active
+ON matches ((1))
+WHERE status IN ('in_progress', 'paused')
+  AND deleted_at IS NULL;
+
 CREATE TABLE IF NOT EXISTS match_players (
   match_id TEXT NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
   player_id TEXT NOT NULL REFERENCES players(id),

@@ -301,6 +301,14 @@ MATCH全体の設定・状態・勝者を保持する。
 
 `double_out`はDB型として予約するが、初期UIから開始不可とする。
 
+設計規則:
+
+- 端末内で`status`が`in_progress`または`paused`のMATCHは1件までとする
+- `uq_matches_active`でDBレベルの一意制約を行う
+- `uq_matches_active`はMATCH全体の多重起動防止を担当する
+- `game_sessions`側の`uq_game_sessions_single_active`とは役割が異なる
+- `uq_game_sessions_single_active`は単独ゲームおよびMATCH内GAMEを含むゲーム進行の多重起動防止を担当する
+
 ---
 
 ## 7.4 `match_players`
@@ -867,6 +875,11 @@ CREATE TABLE IF NOT EXISTS matches (
   updated_at TEXT NOT NULL,
   deleted_at TEXT
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_matches_active
+ON matches ((1))
+WHERE status IN ('in_progress', 'paused')
+  AND deleted_at IS NULL;
 
 CREATE TABLE IF NOT EXISTS match_players (
   match_id TEXT NOT NULL REFERENCES matches(id) ON DELETE CASCADE,

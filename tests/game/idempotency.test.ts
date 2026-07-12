@@ -113,7 +113,7 @@ test('client_action_id prevents duplicate dart registration', async () => {
   }
 });
 
-test('active GAME and MATCH uniqueness constraints work', async () => {
+test('active MATCH uniqueness constraints cover active and terminal states', async () => {
   const db = await createMigratedTestDatabase();
   try {
     await db.runAsync(
@@ -127,32 +127,43 @@ test('active GAME and MATCH uniqueness constraints work', async () => {
       NOW,
     );
 
+    await insertMatch(db, 'match-1', 'in_progress');
+    await assertRejectsSql(() => insertMatch(db, 'match-2', 'in_progress'));
+
     await db.runAsync(
-      `INSERT INTO matches(id, status, zero_one_start_score, out_rule, bull_rule, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      'UPDATE matches SET status = ?, updated_at = ? WHERE id = ?',
+      'completed',
+      NOW,
       'match-1',
-      'in_progress',
-      501,
-      'single_out',
-      'fat_bull',
+    );
+    await insertMatch(db, 'match-3', 'paused');
+    await assertRejectsSql(() => insertMatch(db, 'match-4', 'in_progress'));
+
+    await db.runAsync(
+      'UPDATE matches SET status = ?, updated_at = ? WHERE id = ?',
+      'completed',
+      NOW,
+      'match-3',
+    );
+    await insertMatch(db, 'match-5', 'completed');
+    await insertMatch(db, 'match-6', 'aborted');
+    await insertMatch(db, 'match-7', 'in_progress');
+
+    await db.runAsync(
+      'UPDATE matches SET deleted_at = ?, updated_at = ? WHERE id = ?',
       NOW,
       NOW,
+      'match-7',
     );
+    await insertMatch(db, 'match-8', 'in_progress');
+  } finally {
+    db.close();
+  }
+});
 
-    await assertRejectsSql(() =>
-      db.runAsync(
-        `INSERT INTO matches(id, status, zero_one_start_score, out_rule, bull_rule, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        'match-2',
-        'paused',
-        501,
-        'single_out',
-        'fat_bull',
-        NOW,
-        NOW,
-      ),
-    );
-
+test('active GAME uniqueness constraint still works', async () => {
+  const db = await createMigratedTestDatabase();
+  try {
     await db.runAsync(
       `INSERT INTO game_sessions(id, mode, status, max_rounds, bull_rule, player_count, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -288,6 +299,24 @@ async function insertMinimalGameFixture(
     1,
     1,
     'in_progress',
+    NOW,
+    NOW,
+  );
+}
+
+async function insertMatch(
+  db: Awaited<ReturnType<typeof createMigratedTestDatabase>>,
+  id: string,
+  status: 'configured' | 'in_progress' | 'paused' | 'completed' | 'aborted' | 'invalid',
+) {
+  await db.runAsync(
+    `INSERT INTO matches(id, status, zero_one_start_score, out_rule, bull_rule, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    id,
+    status,
+    501,
+    'single_out',
+    'fat_bull',
     NOW,
     NOW,
   );

@@ -57,7 +57,9 @@ test('migration is idempotent and creates all required tables', async () => {
       `SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name`,
     );
     const names = rows.map((row) => row.name);
+    const requiredTableCount = names.filter((name) => REQUIRED_TABLES.includes(name)).length;
 
+    assert.equal(requiredTableCount, 19);
     for (const tableName of REQUIRED_TABLES) {
       assert.ok(names.includes(tableName), `${tableName} should exist`);
     }
