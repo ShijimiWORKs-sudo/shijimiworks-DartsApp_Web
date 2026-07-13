@@ -6,3 +6,7 @@ package-lock.json
 *.log
 darts_training_app_screen_prompts.md
 deep-research-report.md
+Context/
+DartsApp_DB_v1_schema.sql
+docs/codex/CODEX_PHASE_3_ZERO_ONE_v1.0.md
+docs/codex/DartsApp_Codex_Phase2_COUNT_UP_v1.0.md

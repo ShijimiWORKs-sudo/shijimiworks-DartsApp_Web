@@ -14,6 +14,7 @@ import { colors } from '../constants/theme';
 import { useAppState } from '../contexts/AppStateContext';
 import { useGameDatabase } from '../contexts/GameDatabaseContext';
 import type { CountUpGameState } from '../features/game/domain/countUp';
+import type { ZeroOneGameState } from '../features/game/domain/zeroOne';
 import { calculateAnalysisSummary } from '../utils/analyzePracticeRecords';
 import { recommendPracticeMenus } from '../utils/recommendPracticeMenus';
 
@@ -31,10 +32,13 @@ const menuLinks = [
   { label: '設定を編集', href: '/settings', helper: 'RTと悩みを更新' },
 ] as const;
 
+type ActiveGame =
+  { mode: 'count_up'; game: CountUpGameState } | { mode: 'zero_one'; game: ZeroOneGameState };
+
 export default function HomeScreen() {
   const router = useRouter();
   const { services } = useGameDatabase();
-  const [activeGame, setActiveGame] = useState<CountUpGameState | null>(null);
+  const [activeGame, setActiveGame] = useState<ActiveGame | null>(null);
   const {
     isLoading,
     profile,
@@ -62,9 +66,18 @@ export default function HomeScreen() {
           return;
         }
 
-        const game = await services.countUp.getActiveGame();
+        const [countUp, zeroOne] = await Promise.all([
+          services.countUp.getActiveGame(),
+          services.zeroOne.getActiveGame(),
+        ]);
         if (mounted) {
-          setActiveGame(game);
+          setActiveGame(
+            zeroOne
+              ? { mode: 'zero_one', game: zeroOne }
+              : countUp
+                ? { mode: 'count_up', game: countUp }
+                : null,
+          );
         }
       }
 
@@ -103,7 +116,7 @@ export default function HomeScreen() {
       <Card muted>
         <SectionTitle
           title="ゲームを始める"
-          subtitle="COUNT-UPをDBへ保存しながらプレイできます。"
+          subtitle="COUNT-UPと単独01をDBへ保存しながらプレイできます。"
           tone="card"
         />
         <View style={styles.gameAction}>
@@ -114,13 +127,13 @@ export default function HomeScreen() {
       {activeGame ? (
         <Pressable
           accessibilityRole="button"
-          onPress={() => router.push(`/game/count-up/${activeGame.gameId}`)}
+          onPress={() => router.push(getActiveRoute(activeGame))}
           style={({ pressed }) => pressed && styles.pressed}
         >
           <Card>
             <SectionTitle
-              title={activeGame.status === 'paused' ? 'COUNT-UPを再開' : '進行中のCOUNT-UP'}
-              subtitle={`Round ${activeGame.currentRoundNo} / 8、現在 ${activeGame.totalScore} 点`}
+              title={getActiveTitle(activeGame)}
+              subtitle={getActiveSubtitle(activeGame)}
               tone="card"
             />
           </Card>
@@ -265,6 +278,26 @@ export default function HomeScreen() {
 
 function trimSummary(text: string, maxLength: number) {
   return text.length > maxLength ? `${text.slice(0, maxLength)}...` : text;
+}
+
+function getActiveRoute(active: ActiveGame) {
+  return active.mode === 'zero_one'
+    ? `/game/01/${active.game.gameId}`
+    : `/game/count-up/${active.game.gameId}`;
+}
+
+function getActiveTitle(active: ActiveGame) {
+  if (active.mode === 'zero_one') {
+    return active.game.status === 'paused' ? '01 GAMEを再開' : '進行中の01 GAME';
+  }
+  return active.game.status === 'paused' ? 'COUNT-UPを再開' : '進行中のCOUNT-UP';
+}
+
+function getActiveSubtitle(active: ActiveGame) {
+  if (active.mode === 'zero_one') {
+    return `Round ${active.game.currentRoundNo} / 15、残り ${active.game.currentRemainingScore} 点`;
+  }
+  return `Round ${active.game.currentRoundNo} / 8、現在 ${active.game.totalScore} 点`;
 }
 
 function formatDate(date: string) {
