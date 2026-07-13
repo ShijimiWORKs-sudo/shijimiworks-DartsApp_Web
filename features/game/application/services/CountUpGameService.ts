@@ -344,7 +344,7 @@ export class CountUpGameService {
     return this.loadGame(gameId);
   }
 
-  async redoDart(gameId: string): Promise<CountUpGameState> {
+  async redoDart(gameId: string, dartId: string): Promise<CountUpGameState> {
     await this.db.withExclusiveTransactionAsync(async (transaction) => {
       const context = await loadMutableTurnContext(transaction, gameId, 'in_progress');
       const activeCount = await countActiveDarts(transaction, context.turnId);
@@ -354,17 +354,18 @@ export class CountUpGameService {
       }
 
       const nextDartNo = activeCount + 1;
-      const dart = await transaction.getFirstAsync<{ id: string }>(
-        `SELECT id
+      const dart = await transaction.getFirstAsync<{ id: string; dart_no: number }>(
+        `SELECT id, dart_no
          FROM darts
-         WHERE turn_id = ? AND dart_no = ? AND status = ?
+         WHERE id = ? AND game_id = ? AND turn_id = ? AND status = ?
          LIMIT 1`,
+        dartId,
+        gameId,
         context.turnId,
-        nextDartNo,
         'voided',
       );
 
-      if (!dart) {
+      if (!dart || dart.dart_no !== nextDartNo) {
         return;
       }
 

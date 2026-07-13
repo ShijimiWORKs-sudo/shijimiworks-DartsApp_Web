@@ -18,9 +18,12 @@ Phase 2ではCOUNT-UPのみを実装しました。01、CRICKET、MATCH、Rating
 - Bull設定は `fat_bull` と `separate_bull`
 - `fat_bull`: Outer Bull / Inner Bull ともに50点
 - `separate_bull`: Outer Bull 25点、Inner Bull 50点
-- undo/redoは `darts.status` の更新で実現し、物理削除しない
+- undoは `darts.status = 'voided'` へ更新し、物理削除しない
+- redoは同じプレイ画面セッション内のRedoスタックが保持するdart idだけを `active` に戻す
+- 一時停止してゲームハブへ戻る、別画面遷移、アプリ再起動、プレイ画面再マウント後はRedo不可
 - `client_action_id` で投擲入力の冪等性を担保
 - COUNT-UPは `rating_candidate = 0`、各dartも `is_rating_eligible = 0`
+- COUNT-UPプレイ画面はiOS swipe backを `gestureEnabled: false` で無効化し、navigation pop / Android back / 明示ボタンを3択確認へ集約
 
 ## DB / Outbox
 
@@ -45,6 +48,8 @@ Phase 2ではCOUNT-UPのみを実装しました。01、CRICKET、MATCH、Rating
 - completed / aborted 後に新しいCOUNT-UPを開始可能
 - `client_action_id` の冪等性
 - undo/redoでdart行を物理削除しないこと
+- 戻る確認の3択が pause / continue / abort へ接続されること
+- Redoが同一画面セッション内だけで利用でき、再マウント相当の新規セッションでは候補を持たないこと
 - 8ラウンド完了時のresult、Outbox pending、PracticeRecord link pending
 - completed / aborted 後の追加入力拒否
 - migration再実行と19テーブル維持は既存migrationテストで継続確認

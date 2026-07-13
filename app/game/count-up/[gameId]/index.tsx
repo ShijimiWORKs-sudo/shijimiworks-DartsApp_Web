@@ -1,5 +1,5 @@
-import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useMemo, useState } from 'react';
+import { Stack, useFocusEffect, useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { Alert, BackHandler, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { AppButton } from '../../../../components/AppButton';
@@ -9,13 +9,24 @@ import { SectionTitle } from '../../../../components/SectionTitle';
 import { colors } from '../../../../constants/theme';
 import { useAppState } from '../../../../contexts/AppStateContext';
 import { useGameDatabase } from '../../../../contexts/GameDatabaseContext';
+import { CountUpRedoSession } from '../../../../features/game/application/services/CountUpRedoSession';
+import { createCountUpLeaveChoices } from '../../../../features/game/application/services/countUpLeaveActions';
 import type { CountUpDartInput, CountUpGameState } from '../../../../features/game/domain/countUp';
 import type { DartArea } from '../../../../features/game/domain/types';
 
 const segmentNumbers = Array.from({ length: 20 }, (_, index) => index + 1);
 
+type BeforeRemoveEvent = {
+  preventDefault: () => void;
+};
+
+type BeforeRemoveNavigation = {
+  addListener(event: 'beforeRemove', callback: (event: BeforeRemoveEvent) => void): () => void;
+};
+
 export default function CountUpPlayScreen() {
   const router = useRouter();
+  const navigation = useNavigation<BeforeRemoveNavigation>();
   const params = useLocalSearchParams<{ gameId: string }>();
   const gameId = Array.isArray(params.gameId) ? params.gameId[0] : params.gameId;
   const { profile } = useAppState();
@@ -23,6 +34,9 @@ export default function CountUpPlayScreen() {
   const [game, setGame] = useState<CountUpGameState | null>(null);
   const [selectedSegment, setSelectedSegment] = useState(20);
   const [isBusy, setIsBusy] = useState(false);
+  const [canRedo, setCanRedo] = useState(false);
+  const allowNavigationRef = useRef(false);
+  const redoSessionRef = useRef(new CountUpRedoSession());
 
   const currentDarts = useMemo(
     () => game?.turns.find((turn) => turn.id === game.currentTurnId)?.darts ?? [],
@@ -30,6 +44,20 @@ export default function CountUpPlayScreen() {
   );
   const activeDarts = currentDarts.filter((dart) => dart.status === 'active');
   const inputDisabled = !game || game.status !== 'in_progress' || activeDarts.length >= 3 || isBusy;
+
+  const syncRedoState = useCallback(() => {
+    setCanRedo(redoSessionRef.current.canRedo);
+  }, []);
+
+  const clearRedoSession = useCallback(() => {
+    redoSessionRef.current.clear();
+    syncRedoState();
+  }, [syncRedoState]);
+
+  const navigateToGameHub = useCallback(() => {
+    allowNavigationRef.current = true;
+    router.replace('/game');
+  }, [router]);
 
   const loadGame = useCallback(async () => {
     if (!services || !gameId) {
@@ -39,31 +67,42 @@ export default function CountUpPlayScreen() {
     const nextGame = await services.countUp.loadGame(gameId);
     setGame(nextGame);
     if (nextGame.status === 'completed') {
+      allowNavigationRef.current = true;
       router.replace(`/game/count-up/${nextGame.gameId}/result`);
     }
   }, [gameId, router, services]);
 
   const promptLeave = useCallback(() => {
     if (!services || !game) {
-      router.replace('/game');
+      navigateToGameHub();
       return;
     }
 
     if (game.status !== 'in_progress') {
-      router.replace('/game');
+      navigateToGameHub();
       return;
     }
 
-    Alert.alert('ゲームを一時停止しますか？', '戻る前にCOUNT-UPを一時停止できます。', [
-      { text: '続ける', style: 'cancel' },
-      {
-        text: '一時停止して戻る',
+    const choices = createCountUpLeaveChoices({
+      gameId: game.gameId,
+      countUp: services.countUp,
+      navigateToGameHub,
+    });
+
+    Alert.alert(
+      'COUNT-UPを離れますか？',
+      '進行中のゲームを保存して戻るか、途中終了として保存できます。',
+      choices.map((choice) => ({
+        text: choice.label,
+        style: choice.style,
         onPress: () => {
-          void services.countUp.pauseGame(game.gameId).then(() => router.replace('/game'));
+          void choice.run().catch((error) => {
+            Alert.alert('操作できませんでした', getErrorMessage(error));
+          });
         },
-      },
-    ]);
-  }, [game, router, services]);
+      })),
+    );
+  }, [game, navigateToGameHub, services]);
 
   useFocusEffect(
     useCallback(() => {
@@ -76,6 +115,21 @@ export default function CountUpPlayScreen() {
     }, [loadGame, promptLeave]),
   );
 
+  useFocusEffect(
+    useCallback(() => {
+      const unsubscribe = navigation.addListener('beforeRemove', (event) => {
+        if (allowNavigationRef.current || !game || game.status !== 'in_progress') {
+          return;
+        }
+
+        event.preventDefault();
+        promptLeave();
+      });
+
+      return unsubscribe;
+    }, [game, navigation, promptLeave]),
+  );
+
   const runAction = useCallback(
     async (action: () => Promise<CountUpGameState | void>) => {
       setIsBusy(true);
@@ -84,6 +138,7 @@ export default function CountUpPlayScreen() {
         if (nextGame) {
           setGame(nextGame);
           if (nextGame.status === 'completed') {
+            allowNavigationRef.current = true;
             router.replace(`/game/count-up/${nextGame.gameId}/result`);
           }
         } else {
@@ -110,9 +165,13 @@ export default function CountUpPlayScreen() {
         inputSource: 'manual_segment',
         clientActionId: `${game.gameId}:${Date.now()}:${Math.random()}`,
       };
-      void runAction(() => services.countUp.recordDart(game.gameId, input));
+      void runAction(async () => {
+        const nextGame = await services.countUp.recordDart(game.gameId, input);
+        clearRedoSession();
+        return nextGame;
+      });
     },
-    [game, inputDisabled, runAction, services],
+    [clearRedoSession, game, inputDisabled, runAction, services],
   );
 
   const handleAbort = useCallback(() => {
@@ -128,16 +187,17 @@ export default function CountUpPlayScreen() {
         onPress: () => {
           void runAction(async () => {
             await services.countUp.abortGame(game.gameId);
-            router.replace('/game');
+            navigateToGameHub();
           });
         },
       },
     ]);
-  }, [game, router, runAction, services]);
+  }, [game, navigateToGameHub, runAction, services]);
 
   if (!game) {
     return (
       <ScreenShell showNav={false}>
+        <Stack.Screen options={{ gestureEnabled: false }} />
         <SectionTitle title="COUNT-UP" subtitle="読み込み中..." />
       </ScreenShell>
     );
@@ -145,6 +205,7 @@ export default function CountUpPlayScreen() {
 
   return (
     <ScreenShell showNav={false}>
+      <Stack.Screen options={{ gestureEnabled: false }} />
       <View style={styles.headerRow}>
         <View style={styles.headerText}>
           <Text style={styles.kicker}>COUNT-UP</Text>
@@ -200,7 +261,15 @@ export default function CountUpPlayScreen() {
             label="1投戻す"
             onPress={() => {
               if (services) {
-                void runAction(() => services.countUp.undoDart(game.gameId));
+                const undoneDartId = activeDarts[activeDarts.length - 1]?.id ?? null;
+                void runAction(async () => {
+                  const nextGame = await services.countUp.undoDart(game.gameId);
+                  if (undoneDartId) {
+                    redoSessionRef.current.push(undoneDartId);
+                    syncRedoState();
+                  }
+                  return nextGame;
+                });
               }
             }}
             variant="secondary"
@@ -210,21 +279,33 @@ export default function CountUpPlayScreen() {
             label="やり直す"
             onPress={() => {
               if (services) {
-                void runAction(() => services.countUp.redoDart(game.gameId));
+                const redoDartId = redoSessionRef.current.pop();
+                if (!redoDartId) {
+                  syncRedoState();
+                  return;
+                }
+
+                void runAction(async () => {
+                  const nextGame = await services.countUp.redoDart(game.gameId, redoDartId);
+                  syncRedoState();
+                  return nextGame;
+                });
               }
             }}
             variant="secondary"
-            disabled={isBusy || game.status !== 'in_progress'}
+            disabled={isBusy || game.status !== 'in_progress' || !canRedo}
           />
           <AppButton
             label={game.currentRoundNo >= 8 ? 'ゲームを完了' : 'ラウンド確定'}
             onPress={() => {
               if (services) {
-                void runAction(() =>
-                  services.countUp.confirmTurn(game.gameId, {
+                void runAction(async () => {
+                  const nextGame = await services.countUp.confirmTurn(game.gameId, {
                     machineType: profile?.machineType ?? null,
-                  }),
-                );
+                  });
+                  clearRedoSession();
+                  return nextGame;
+                });
               }
             }}
             disabled={isBusy || game.status !== 'in_progress' || activeDarts.length === 0}
