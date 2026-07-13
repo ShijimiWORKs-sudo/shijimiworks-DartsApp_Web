@@ -170,12 +170,14 @@ Phase 1では、後続のCOUNT-UP / 01 / CRICKET / MATCH実装に向けたSQLite
 Phase 2では、COUNT-UPの縦断実装を追加しています。
 Phase 3では、1人用の単独01縦断実装を追加しています。
 Phase 4では、ローカルAccount、OWNER紐付け、Rating Profile、単独Rating候補判定の基盤を追加します。
+共通Account契約では、DartsApp / DartsSupportApp連携へ向けてAccount ID、共通JSON、CommonEvent、Outbox、Export / Import検証の境界を追加します。
 
 - DBファイル名: `dartsapp_games.db`
 - 保存方式: `expo-sqlite`
 - migration管理: `PRAGMA user_version` と `db_migrations`
 - v1 migration: `features/game/infrastructure/sqlite/migrations/001_initial.ts`
 - v2 migration: `features/game/infrastructure/sqlite/migrations/002_account_rating_foundation.ts`
+- v3 migration: `features/game/infrastructure/sqlite/migrations/003_common_account_contract.ts`
 - SQL正本: `docs/specs/DartsApp_DB_v1_schema.sql`
 
 DB初期化時に以下を適用します。
@@ -216,12 +218,22 @@ COUNT-UPでできること:
 Account / Rating基盤:
 
 - `/account/register` で端末内ローカルAccountを登録
-- `/account/profile` でAccount状態、OWNER紐付け、Rating状態を表示
+- `/account/profile` でAccount状態、OWNER紐付け、Rating状態、共通Account IDを表示
 - `/account/rating-status` で初回MATCH測定状態と単独Rating対象可否を表示
 - Account登録はゲーム開始の必須条件ではありません
 - GUESTには正式Rating Profile、Rating Evaluation、Rating Snapshotを作成しません
 - COUNT-UPは常にRating対象外です
 - Rating計算本体、Snapshot更新エンジン、Rating履歴画面の完全実装は後続フェーズで扱います
+
+共通Account契約:
+
+- `account_id` はUUID v4形のAccount IDを外部契約の正本にします
+- 既存Account IDは書き換えず、旧IDがある場合は段階的移行用の `legacy_account_id` を保持できます
+- OWNER Playerは `players.account_id` でAccountへ紐付き、Rating Profileは `account_id` を所有者として保持します
+- `features/common-contract` がAccount、OWNER profile、Rating、Game Session、CommonEvent、Export Envelopeをsnake_case JSONへ変換します
+- `common_events` と `common_outbox` は将来同期用のローカル境界です
+- 現段階のOutbox状態は `local_only` で、DartsSupportApp通信、API通信、クラウド同期は実装しません
+- Importはcontract名、version、UUID、payloadの検証と件数プレビューだけを行い、既存DBを無条件上書きしません
 
 CRICKET本体、MATCH本体、効果音・アワード動画は次フェーズ以降で実装します。
 
@@ -241,6 +253,7 @@ CRICKET本体、MATCH本体、効果音・アワード動画は次フェーズ�
 - AI API連携
 - クラウド同期
 - ログイン
+- Supabase / Apple Login / Google Login
 - 外部グラフライブラリ
 - 本番向けデータバックアップ
 
@@ -260,6 +273,7 @@ CRICKET本体、MATCH本体、効果音・アワード動画は次フェーズ�
 - `docs/implementation/PHASE_2_REPORT.md`
 - `docs/implementation/PHASE_3_REPORT.md`
 - `docs/implementation/PHASE_4_REPORT.md`
+- `docs/implementation/DARTSAPP_COMMON_CONTRACT_REPORT.md`
 - `docs/implementation/OPEN_QUESTIONS.md`
 - `docs/EAS_BUILD_GUIDE.md`
 - `docs/TESTFLIGHT_PREP.md`

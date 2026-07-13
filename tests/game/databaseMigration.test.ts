@@ -32,20 +32,22 @@ const REQUIRED_TABLES = [
   'accounts',
   'rating_profiles',
   'rating_migration_orphans',
+  'common_events',
+  'common_outbox',
 ];
 
-test('game database migrations apply to an empty DB and set user_version to 2', async () => {
+test('game database migrations apply to an empty DB and set user_version to 3', async () => {
   const db = await createMigratedTestDatabase();
   try {
     const version = await db.getFirstAsync<{ user_version: number }>('PRAGMA user_version;');
-    assert.equal(version?.user_version, 2);
+    assert.equal(version?.user_version, 3);
 
     const migrations = await db.getAllAsync<{ version: number; name: string }>(
       'SELECT version, name FROM db_migrations ORDER BY version',
     );
     assert.deepEqual(
       migrations.map((migration) => migration.version),
-      [1, 2],
+      [1, 2, 3],
     );
   } finally {
     db.close();
@@ -72,7 +74,7 @@ test('migration is idempotent and creates all required tables', async () => {
     const migrationCount = await db.getFirstAsync<{ count: number }>(
       'SELECT COUNT(*) AS count FROM db_migrations',
     );
-    assert.equal(migrationCount?.count, 2);
+    assert.equal(migrationCount?.count, 3);
   } finally {
     db.close();
   }

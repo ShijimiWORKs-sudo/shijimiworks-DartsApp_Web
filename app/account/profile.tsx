@@ -114,6 +114,19 @@ export default function AccountProfileScreen() {
 
           <Card>
             <SectionTitle
+              title="共通Account契約"
+              subtitle="このIDは将来のDartsApp / DartsSupportApp連携で使用します。"
+              tone="card"
+            />
+            <View style={styles.contractRows}>
+              <InfoRow label="Common Account ID" value={overview.account.id} />
+              <InfoRow label="JSON契約" value="darts_common_data v1" />
+              <InfoRow label="Export / Import" value="基盤のみ実装、通信は未実装" />
+            </View>
+          </Card>
+
+          <Card>
+            <SectionTitle
               title="編集"
               subtitle="ユーザーIDはPhase 4では変更しません。"
               tone="card"
@@ -179,6 +192,17 @@ function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : '不明なエラーです。';
 }
 
+function InfoRow({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={styles.infoRow}>
+      <Text style={styles.infoLabel}>{label}</Text>
+      <Text selectable style={styles.infoValue}>
+        {value}
+      </Text>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   form: {
     gap: 10,
@@ -201,6 +225,29 @@ const styles = StyleSheet.create({
   },
   actions: {
     gap: 10,
+  },
+  contractRows: {
+    gap: 8,
+    marginTop: 14,
+  },
+  infoRow: {
+    minHeight: 46,
+    justifyContent: 'center',
+    borderRadius: 8,
+    backgroundColor: colors.surfaceMuted,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  infoLabel: {
+    color: colors.textMuted,
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  infoValue: {
+    marginTop: 3,
+    color: colors.text,
+    fontSize: 13,
+    fontWeight: '900',
   },
   message: {
     color: colors.textMuted,
