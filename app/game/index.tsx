@@ -24,7 +24,7 @@ type RecentGame =
 export default function GameHubScreen() {
   const router = useRouter();
   const { activeAccountId } = useAppState();
-  const { services, isAvailable } = useGameDatabase();
+  const { accountBootstrapStatus, services, isAvailable } = useGameDatabase();
   const [activeGame, setActiveGame] = useState<ActiveGame | null>(null);
   const [recentResults, setRecentResults] = useState<RecentGame[]>([]);
   const [accountOverview, setAccountOverview] = useState<AccountOverview | null>(null);
@@ -93,6 +93,22 @@ export default function GameHubScreen() {
 
       {accountOverview ? (
         <RatingStatusCard overview={accountOverview} />
+      ) : accountBootstrapStatus === 'loading' ? (
+        <Card muted>
+          <SectionTitle
+            title="Rating状態を確認中"
+            subtitle="保存済みAccountとRating Profileを確認しています。"
+            tone="card"
+          />
+        </Card>
+      ) : accountBootstrapStatus === 'temporarilyUnavailable' ? (
+        <Card muted>
+          <SectionTitle
+            title="Account情報を確認できませんでした"
+            subtitle="少し待ってからもう一度お試しください。"
+            tone="card"
+          />
+        </Card>
       ) : (
         <>
           <AccountLocalNotice />

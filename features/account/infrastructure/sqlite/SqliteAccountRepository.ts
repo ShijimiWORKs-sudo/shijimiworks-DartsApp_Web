@@ -58,6 +58,22 @@ export class SqliteAccountRepository implements AccountRepository {
   constructor(private readonly db: GameDatabaseConnection) {}
 
   async findOverviewByAccountId(accountId: string): Promise<AccountOverview | null> {
+    const overview = await loadOverview(this.db, accountId);
+    if (overview) {
+      return overview;
+    }
+
+    const accountExists = await this.db.getFirstAsync<{ id: string }>(
+      `SELECT id
+       FROM accounts
+       WHERE id = ? AND deleted_at IS NULL
+       LIMIT 1`,
+      accountId,
+    );
+    if (!accountExists) {
+      return null;
+    }
+
     await this.ensureRatingProfile(accountId);
     return loadOverview(this.db, accountId);
   }

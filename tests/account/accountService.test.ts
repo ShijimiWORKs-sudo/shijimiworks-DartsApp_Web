@@ -216,6 +216,52 @@ test('duplicate userName is rejected without creating another OWNER', async () =
   db.close();
 });
 
+test('missing active account id resolves to null without creating a new account', async () => {
+  const db = await createAccountTestDatabase();
+  const service = createAccountService(db);
+
+  const overview = await service.getAccountById('missing-account');
+
+  assert.equal(overview, null);
+
+  const accountCount = await db.getFirstAsync<{ count: number }>(
+    `SELECT COUNT(*) AS count FROM accounts`,
+  );
+  assert.equal(accountCount?.count, 0);
+  db.close();
+});
+
+test('double registration attempts do not create duplicate accounts or owners', async () => {
+  const db = await createAccountTestDatabase();
+  const service = createAccountService(db);
+
+  const results = await Promise.allSettled([
+    service.registerLocalAccount({
+      userName: 'player_01',
+      displayName: 'Player One',
+    }),
+    service.registerLocalAccount({
+      userName: 'player_01',
+      displayName: 'Player One',
+    }),
+  ]);
+
+  assert.equal(
+    results.some((result) => result.status === 'fulfilled'),
+    true,
+  );
+
+  const accountCount = await db.getFirstAsync<{ count: number }>(
+    `SELECT COUNT(*) AS count FROM accounts`,
+  );
+  const ownerCount = await db.getFirstAsync<{ count: number }>(
+    `SELECT COUNT(*) AS count FROM players WHERE player_type = 'owner' AND is_archived = 0`,
+  );
+  assert.equal(accountCount?.count, 1);
+  assert.equal(ownerCount?.count, 1);
+  db.close();
+});
+
 test('profile update keeps userName, normalizes email, and updates OWNER display name', async () => {
   const db = await createAccountTestDatabase();
   const service = createAccountService(db);

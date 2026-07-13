@@ -1,5 +1,5 @@
 import { useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { Alert, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { AppButton } from '../../components/AppButton';
@@ -25,9 +25,10 @@ type ServicesWithAccount = {
 export default function AccountRegisterScreen() {
   const router = useRouter();
   const appState = useAppState() as AccountAppState;
-  const { services, isAvailable } = useGameDatabase();
+  const { accountBootstrapStatus, services, isAvailable } = useGameDatabase();
   const accountService = (services as ServicesWithAccount | null)?.account ?? null;
   const activeAccountId = appState.activeAccountId ?? null;
+  const setActiveAccountId = appState.setActiveAccountId;
   const [registrationTarget, setRegistrationTarget] = useState<AccountOverview | null>(null);
   const [userName, setUserName] = useState('');
   const [displayName, setDisplayName] = useState('');
@@ -35,6 +36,7 @@ export default function AccountRegisterScreen() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const isSubmittingRef = useRef(false);
 
   useFocusEffect(
     useCallback(() => {
@@ -52,13 +54,28 @@ export default function AccountRegisterScreen() {
         }
 
         try {
-          const activeAccount = await accountService.getActiveAccount(activeAccountId);
+          const activeAccount = activeAccountId
+            ? await accountService.getAccountById(activeAccountId)
+            : null;
           if (!mounted) {
             return;
           }
 
           if (activeAccount?.account.status === 'local_registered') {
             router.replace('/account/profile');
+            return;
+          }
+
+          const registeredAccount = await accountService.getActiveAccount(null);
+          if (!mounted) {
+            return;
+          }
+
+          if (registeredAccount) {
+            await Promise.resolve(setActiveAccountId?.(registeredAccount.account.id));
+            if (mounted) {
+              router.replace('/account/profile');
+            }
             return;
           }
 
@@ -71,7 +88,7 @@ export default function AccountRegisterScreen() {
           setDisplayName((current) => current || target?.ownerPlayer.displayName || '');
         } catch (error) {
           if (mounted) {
-            setErrorMessage(getErrorMessage(error));
+            setErrorMessage(getUserFacingErrorMessage(error));
           }
         } finally {
           if (mounted) {
@@ -84,35 +101,46 @@ export default function AccountRegisterScreen() {
       return () => {
         mounted = false;
       };
-    }, [accountService, activeAccountId, router]),
+    }, [accountService, activeAccountId, router, setActiveAccountId]),
   );
 
   const handleRegister = useCallback(async () => {
-    if (!accountService || isSubmitting) {
+    if (!accountService || isSubmittingRef.current) {
       return;
     }
 
+    isSubmittingRef.current = true;
     setIsSubmitting(true);
     setErrorMessage(null);
 
     try {
+      const existing = await accountService.getActiveAccount(activeAccountId);
+      if (existing?.account.status === 'local_registered') {
+        await Promise.resolve(setActiveAccountId?.(existing.account.id));
+        router.replace('/account/profile');
+        return;
+      }
+
       const overview = await accountService.registerLocalAccount({
         userName,
         displayName,
         email,
       });
-      await Promise.resolve(appState.setActiveAccountId?.(overview.account.id));
+      await Promise.resolve(setActiveAccountId?.(overview.account.id));
       router.replace('/account/profile');
     } catch (error) {
-      const message = getErrorMessage(error);
+      const message = getUserFacingErrorMessage(error);
       setErrorMessage(message);
       Alert.alert('Accountを登録できませんでした', message);
     } finally {
+      isSubmittingRef.current = false;
       setIsSubmitting(false);
     }
-  }, [accountService, appState, displayName, email, isSubmitting, router, userName]);
+  }, [accountService, activeAccountId, displayName, email, router, setActiveAccountId, userName]);
 
-  const isDisabled = !isAvailable || !accountService || isLoading || isSubmitting;
+  const isAccountTemporarilyUnavailable = accountBootstrapStatus === 'temporarilyUnavailable';
+  const isDisabled =
+    !isAvailable || !accountService || isLoading || isSubmitting || isAccountTemporarilyUnavailable;
 
   return (
     <ScreenShell>
@@ -123,6 +151,14 @@ export default function AccountRegisterScreen() {
       {!accountService ? (
         <Card muted>
           <Text style={styles.message}>Accountサービスの接続を待っています。</Text>
+        </Card>
+      ) : null}
+
+      {isAccountTemporarilyUnavailable ? (
+        <Card muted>
+          <Text style={styles.message}>
+            Account情報を確認できませんでした。少し待ってからもう一度お試しください。
+          </Text>
         </Card>
       ) : null}
 
@@ -198,8 +234,25 @@ function FieldLabel({ label, helper }: { label: string; helper: string }) {
   );
 }
 
-function getErrorMessage(error: unknown) {
+function getUserFacingErrorMessage(error: unknown) {
+  if (isDatabaseLockError(error)) {
+    return 'Account情報を確認できませんでした。少し待ってからもう一度お試しください。';
+  }
+
   return error instanceof Error ? error.message : '不明なエラーです。';
+}
+
+function isDatabaseLockError(error: unknown): boolean {
+  const candidate = error as { message?: unknown; code?: unknown; cause?: unknown };
+  const code = typeof candidate?.code === 'string' ? candidate.code : '';
+  const message = typeof candidate?.message === 'string' ? candidate.message : '';
+
+  return (
+    code === 'SQLITE_BUSY' ||
+    code === 'SQLITE_LOCKED' ||
+    /SQLITE_BUSY|SQLITE_LOCKED|database is locked|error code 5/i.test(message) ||
+    (candidate?.cause ? isDatabaseLockError(candidate.cause) : false)
+  );
 }
 
 const styles = StyleSheet.create({

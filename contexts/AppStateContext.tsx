@@ -6,6 +6,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react';
 
@@ -34,6 +35,11 @@ import type {
 } from '../types';
 import { calculateAnalysisSummary } from '../utils/analyzePracticeRecords';
 import {
+  createAppStatePatchStore,
+  type AppStatePatch,
+  type AppStatePatchStore,
+} from '../utils/appStatePatchStore';
+import {
   defaultPracticeFilterState,
   migrateAppState,
   normalizePracticeFilterState,
@@ -48,6 +54,22 @@ import {
 const appStateStorageKey = 'DartsSupportApp:appState';
 const profileStorageKey = 'DartsSupportApp:userProfile';
 const recordsStorageKey = 'DartsSupportApp:practiceRecords';
+
+function createInitialAppState(): AppState {
+  return {
+    schemaVersion,
+    activeAccountId: null,
+    profile: null,
+    records: [],
+    favoritePracticeMenuIds: [],
+    practiceFilterState: defaultPracticeFilterState,
+    consultHistories: [],
+    formPhotoAdviceResults: [],
+    boardReferenceImages: [],
+    uiTheme: 'gray',
+    backgroundTheme: defaultBackgroundTheme,
+  };
+}
 
 type AppStateContextValue = {
   isLoading: boolean;
@@ -98,6 +120,11 @@ type AppStateContextValue = {
 const AppStateContext = createContext<AppStateContextValue | null>(null);
 
 export function AppStateProvider({ children }: PropsWithChildren) {
+  const appStateStoreRef = useRef<AppStatePatchStore | null>(null);
+  if (!appStateStoreRef.current) {
+    appStateStoreRef.current = createAppStatePatchStore(createInitialAppState(), persistAppState);
+  }
+
   const [isLoading, setIsLoading] = useState(true);
   const [activeAccountId, setActiveAccountIdState] = useState<string | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
@@ -144,9 +171,10 @@ export function AppStateProvider({ children }: PropsWithChildren) {
         setBoardReferenceImages(sortBoardReferenceImages(migratedState.boardReferenceImages));
         setUiTheme(migratedState.uiTheme);
         setBackgroundTheme(migratedState.backgroundTheme);
+        appStateStoreRef.current?.setSnapshot(migratedState);
 
         if (getStoredSchemaVersion(storedAppState) !== schemaVersion) {
-          await persistAppState(migratedState);
+          await appStateStoreRef.current?.persistSnapshot(migratedState);
         }
       } finally {
         if (mounted) {
@@ -162,38 +190,9 @@ export function AppStateProvider({ children }: PropsWithChildren) {
     };
   }, []);
 
-  const persistCurrentState = useCallback(
-    async (overrides: Partial<Omit<AppState, 'schemaVersion'>>) => {
-      const nextState: AppState = {
-        schemaVersion,
-        activeAccountId,
-        profile,
-        records,
-        favoritePracticeMenuIds,
-        practiceFilterState,
-        consultHistories,
-        formPhotoAdviceResults,
-        boardReferenceImages,
-        uiTheme,
-        backgroundTheme,
-        ...overrides,
-      };
-
-      await persistAppState(nextState);
-    },
-    [
-      backgroundTheme,
-      boardReferenceImages,
-      consultHistories,
-      favoritePracticeMenuIds,
-      formPhotoAdviceResults,
-      activeAccountId,
-      practiceFilterState,
-      profile,
-      records,
-      uiTheme,
-    ],
-  );
+  const persistCurrentState = useCallback(async (overrides: AppStatePatch) => {
+    await appStateStoreRef.current?.persistPatch(overrides);
+  }, []);
 
   const setActiveAccountId = useCallback(
     async (accountId: string | null) => {

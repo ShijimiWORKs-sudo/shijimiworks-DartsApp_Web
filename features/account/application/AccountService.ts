@@ -6,14 +6,18 @@ import type {
   AccountRegistrationInput,
   RatingProfile,
 } from '../domain';
-import { validateAccountProfileUpdate, validateAccountRegistration } from '../domain';
+import {
+  AccountNotFoundError,
+  validateAccountProfileUpdate,
+  validateAccountRegistration,
+} from '../domain';
 
 export class AccountService implements AccountServicePort {
   constructor(private readonly repository: AccountRepository) {}
 
   async getActiveAccount(activeAccountId?: string | null): Promise<AccountOverview | null> {
     if (activeAccountId) {
-      const overview = await this.repository.findOverviewByAccountId(activeAccountId);
+      const overview = await this.getAccountById(activeAccountId);
       return overview?.account.status === 'deleted' ? null : overview;
     }
 
@@ -21,7 +25,14 @@ export class AccountService implements AccountServicePort {
   }
 
   async getAccountById(accountId: string): Promise<AccountOverview | null> {
-    return this.repository.findOverviewByAccountId(accountId);
+    try {
+      return await this.repository.findOverviewByAccountId(accountId);
+    } catch (error) {
+      if (error instanceof AccountNotFoundError) {
+        return null;
+      }
+      throw error;
+    }
   }
 
   async getRegistrationTarget(): Promise<AccountOverview | null> {

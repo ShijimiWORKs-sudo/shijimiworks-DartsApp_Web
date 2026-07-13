@@ -41,7 +41,7 @@ type ActiveGame =
 
 export default function HomeScreen() {
   const router = useRouter();
-  const { services } = useGameDatabase();
+  const { accountBootstrapStatus, services } = useGameDatabase();
   const [activeGame, setActiveGame] = useState<ActiveGame | null>(null);
   const [accountOverview, setAccountOverview] = useState<AccountOverview | null>(null);
   const {
@@ -137,6 +137,22 @@ export default function HomeScreen() {
           <AccountSummaryCard overview={accountOverview} />
           <RatingStatusCard overview={accountOverview} />
         </>
+      ) : accountBootstrapStatus === 'loading' ? (
+        <Card muted>
+          <SectionTitle
+            title="Account確認中"
+            subtitle="保存済みAccount情報を確認しています。"
+            tone="card"
+          />
+        </Card>
+      ) : accountBootstrapStatus === 'temporarilyUnavailable' ? (
+        <Card muted>
+          <SectionTitle
+            title="Account情報を確認できませんでした"
+            subtitle="少し待ってからもう一度お試しください。"
+            tone="card"
+          />
+        </Card>
       ) : (
         <>
           <AccountLocalNotice />
