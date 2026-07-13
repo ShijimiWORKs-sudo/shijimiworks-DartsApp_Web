@@ -17,3 +17,11 @@ export class CountUpRedoSession {
     this.dartIds.length = 0;
   }
 }
+
+export function clearCountUpRedoSession(
+  session: CountUpRedoSession,
+  updateCanRedo: (canRedo: boolean) => void,
+): void {
+  session.clear();
+  updateCanRedo(false);
+}

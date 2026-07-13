@@ -21,6 +21,7 @@ Phase 2ではCOUNT-UPのみを実装しました。01、CRICKET、MATCH、Rating
 - undoは `darts.status = 'voided'` へ更新し、物理削除しない
 - redoは同じプレイ画面セッション内のRedoスタックが保持するdart idだけを `active` に戻す
 - 一時停止してゲームハブへ戻る、別画面遷移、アプリ再起動、プレイ画面再マウント後はRedo不可
+- ゲームハブ遷移直前、COUNT-UPプレイ画面のblur、結果画面遷移直前にRedoスタックをclearする
 - `client_action_id` で投擲入力の冪等性を担保
 - COUNT-UPは `rating_candidate = 0`、各dartも `is_rating_eligible = 0`
 - COUNT-UPプレイ画面はiOS swipe backを `gestureEnabled: false` で無効化し、navigation pop / Android back / 明示ボタンを3択確認へ集約

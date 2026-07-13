@@ -5,7 +5,10 @@ import {
   ActiveGameExistsError,
   CountUpGameService,
 } from '../../features/game/application/services/CountUpGameService';
-import { CountUpRedoSession } from '../../features/game/application/services/CountUpRedoSession';
+import {
+  clearCountUpRedoSession,
+  CountUpRedoSession,
+} from '../../features/game/application/services/CountUpRedoSession';
 import { createCountUpLeaveChoices } from '../../features/game/application/services/countUpLeaveActions';
 import { createMigratedTestDatabase } from './nodeSqliteTestAdapter';
 
@@ -89,6 +92,7 @@ test('COUNT-UP dart input is idempotent and undo/redo preserves dart rows', asyn
 
 test('COUNT-UP redo session only exposes candidates for the current screen instance', () => {
   const session = new CountUpRedoSession();
+  let canRedo = session.canRedo;
   assert.equal(session.canRedo, false);
 
   session.push('dart-1');
@@ -97,8 +101,12 @@ test('COUNT-UP redo session only exposes candidates for the current screen insta
   assert.equal(session.canRedo, false);
 
   session.push('dart-2');
-  session.clear();
+  clearCountUpRedoSession(session, (nextCanRedo) => {
+    canRedo = nextCanRedo;
+  });
+  assert.equal(canRedo, false);
   assert.equal(session.canRedo, false);
+  assert.equal(session.pop(), null);
 
   const remountedSession = new CountUpRedoSession();
   assert.equal(remountedSession.canRedo, false);
@@ -131,6 +139,67 @@ test('COUNT-UP redo requires the current screen session dart id and keeps voided
     const redone = await service.redoDart(game.gameId, dartId);
     assert.equal(redone.currentTurnScore, 20);
     assert.equal(redone.dartsThrown, 1);
+  } finally {
+    db.close();
+  }
+});
+
+test('COUNT-UP pause and screen-exit redo clear keeps voided dart history and allows fresh input after resume', async () => {
+  const db = await createMigratedTestDatabase();
+  try {
+    const service = new CountUpGameService(db);
+    const redoSession = new CountUpRedoSession();
+    let canRedo = false;
+    const game = await service.startGame({ bullRule: 'fat_bull' });
+    const entered = await service.recordDart(game.gameId, {
+      area: 'triple',
+      segmentNumber: 20,
+      clientActionId: 'pause-redo-clear-1',
+    });
+    const dartId = entered.turns[0].darts[0].id;
+
+    await service.undoDart(game.gameId);
+    redoSession.push(dartId);
+    canRedo = redoSession.canRedo;
+    assert.equal(canRedo, true);
+
+    await service.pauseGame(game.gameId);
+    clearCountUpRedoSession(redoSession, (nextCanRedo) => {
+      canRedo = nextCanRedo;
+    });
+
+    assert.equal(canRedo, false);
+    assert.equal(redoSession.pop(), null);
+
+    const paused = await service.getActiveGame();
+    assert.equal(paused?.status, 'paused');
+
+    const voidedBeforeResume = await db.getFirstAsync<{ status: string; count: number }>(
+      `SELECT status, COUNT(*) AS count
+       FROM darts
+       WHERE id = ?
+       GROUP BY status`,
+      dartId,
+    );
+    assert.equal(voidedBeforeResume?.status, 'voided');
+    assert.equal(voidedBeforeResume?.count, 1);
+
+    await service.resumeGame(game.gameId);
+    const afterResume = await service.recordDart(game.gameId, {
+      area: 'single',
+      segmentNumber: 19,
+      clientActionId: 'pause-redo-clear-2',
+    });
+
+    assert.equal(afterResume.status, 'in_progress');
+    assert.equal(afterResume.currentTurnScore, 19);
+    assert.equal(afterResume.dartsThrown, 1);
+
+    const dartRows = await db.getFirstAsync<{ count: number }>(
+      'SELECT COUNT(*) AS count FROM darts WHERE game_id = ?',
+      game.gameId,
+    );
+    assert.equal(dartRows?.count, 1);
   } finally {
     db.close();
   }

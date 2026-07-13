@@ -9,7 +9,10 @@ import { SectionTitle } from '../../../../components/SectionTitle';
 import { colors } from '../../../../constants/theme';
 import { useAppState } from '../../../../contexts/AppStateContext';
 import { useGameDatabase } from '../../../../contexts/GameDatabaseContext';
-import { CountUpRedoSession } from '../../../../features/game/application/services/CountUpRedoSession';
+import {
+  clearCountUpRedoSession,
+  CountUpRedoSession,
+} from '../../../../features/game/application/services/CountUpRedoSession';
 import { createCountUpLeaveChoices } from '../../../../features/game/application/services/countUpLeaveActions';
 import type { CountUpDartInput, CountUpGameState } from '../../../../features/game/domain/countUp';
 import type { DartArea } from '../../../../features/game/domain/types';
@@ -50,14 +53,14 @@ export default function CountUpPlayScreen() {
   }, []);
 
   const clearRedoSession = useCallback(() => {
-    redoSessionRef.current.clear();
-    syncRedoState();
-  }, [syncRedoState]);
+    clearCountUpRedoSession(redoSessionRef.current, setCanRedo);
+  }, []);
 
   const navigateToGameHub = useCallback(() => {
+    clearRedoSession();
     allowNavigationRef.current = true;
     router.replace('/game');
-  }, [router]);
+  }, [clearRedoSession, router]);
 
   const loadGame = useCallback(async () => {
     if (!services || !gameId) {
@@ -67,10 +70,11 @@ export default function CountUpPlayScreen() {
     const nextGame = await services.countUp.loadGame(gameId);
     setGame(nextGame);
     if (nextGame.status === 'completed') {
+      clearRedoSession();
       allowNavigationRef.current = true;
       router.replace(`/game/count-up/${nextGame.gameId}/result`);
     }
-  }, [gameId, router, services]);
+  }, [clearRedoSession, gameId, router, services]);
 
   const promptLeave = useCallback(() => {
     if (!services || !game) {
@@ -117,6 +121,16 @@ export default function CountUpPlayScreen() {
 
   useFocusEffect(
     useCallback(() => {
+      clearRedoSession();
+
+      return () => {
+        clearCountUpRedoSession(redoSessionRef.current, setCanRedo);
+      };
+    }, [clearRedoSession]),
+  );
+
+  useFocusEffect(
+    useCallback(() => {
       const unsubscribe = navigation.addListener('beforeRemove', (event) => {
         if (allowNavigationRef.current || !game || game.status !== 'in_progress') {
           return;
@@ -138,6 +152,7 @@ export default function CountUpPlayScreen() {
         if (nextGame) {
           setGame(nextGame);
           if (nextGame.status === 'completed') {
+            clearRedoSession();
             allowNavigationRef.current = true;
             router.replace(`/game/count-up/${nextGame.gameId}/result`);
           }
@@ -150,7 +165,7 @@ export default function CountUpPlayScreen() {
         setIsBusy(false);
       }
     },
-    [loadGame, router],
+    [clearRedoSession, loadGame, router],
   );
 
   const recordDart = useCallback(
