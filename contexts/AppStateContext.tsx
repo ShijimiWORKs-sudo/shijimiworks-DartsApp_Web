@@ -51,6 +51,7 @@ const recordsStorageKey = 'DartsSupportApp:practiceRecords';
 
 type AppStateContextValue = {
   isLoading: boolean;
+  activeAccountId: string | null;
   profile: UserProfile | null;
   records: PracticeRecord[];
   favoritePracticeMenuIds: string[];
@@ -61,6 +62,7 @@ type AppStateContextValue = {
   uiTheme: UiTheme;
   backgroundTheme: BackgroundTheme;
   theme: ThemeColors;
+  setActiveAccountId: (accountId: string | null) => Promise<void>;
   saveProfile: (profile: Omit<UserProfile, 'level'>) => Promise<void>;
   saveProfileAndUiTheme: (profile: Omit<UserProfile, 'level'>, uiTheme: UiTheme) => Promise<void>;
   saveProfileAndDisplaySettings: (
@@ -97,6 +99,7 @@ const AppStateContext = createContext<AppStateContextValue | null>(null);
 
 export function AppStateProvider({ children }: PropsWithChildren) {
   const [isLoading, setIsLoading] = useState(true);
+  const [activeAccountId, setActiveAccountIdState] = useState<string | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [records, setRecords] = useState<PracticeRecord[]>([]);
   const [favoritePracticeMenuIds, setFavoritePracticeMenuIds] = useState<string[]>([]);
@@ -129,6 +132,7 @@ export function AppStateProvider({ children }: PropsWithChildren) {
           records: storedRecords ? (JSON.parse(storedRecords) as PracticeRecord[]) : [],
         });
 
+        setActiveAccountIdState(migratedState.activeAccountId);
         setProfile(migratedState.profile);
         setRecords(sortRecords(migratedState.records));
         setFavoritePracticeMenuIds(migratedState.favoritePracticeMenuIds);
@@ -162,6 +166,7 @@ export function AppStateProvider({ children }: PropsWithChildren) {
     async (overrides: Partial<Omit<AppState, 'schemaVersion'>>) => {
       const nextState: AppState = {
         schemaVersion,
+        activeAccountId,
         profile,
         records,
         favoritePracticeMenuIds,
@@ -182,11 +187,20 @@ export function AppStateProvider({ children }: PropsWithChildren) {
       consultHistories,
       favoritePracticeMenuIds,
       formPhotoAdviceResults,
+      activeAccountId,
       practiceFilterState,
       profile,
       records,
       uiTheme,
     ],
+  );
+
+  const setActiveAccountId = useCallback(
+    async (accountId: string | null) => {
+      setActiveAccountIdState(accountId);
+      await persistCurrentState({ activeAccountId: accountId });
+    },
+    [persistCurrentState],
   );
 
   const saveProfile = useCallback(
@@ -448,6 +462,7 @@ export function AppStateProvider({ children }: PropsWithChildren) {
   const value = useMemo(
     () => ({
       isLoading,
+      activeAccountId,
       profile,
       records,
       favoritePracticeMenuIds,
@@ -458,6 +473,7 @@ export function AppStateProvider({ children }: PropsWithChildren) {
       uiTheme,
       backgroundTheme,
       theme,
+      setActiveAccountId,
       saveProfile,
       saveProfileAndUiTheme,
       saveProfileAndDisplaySettings,
@@ -487,6 +503,7 @@ export function AppStateProvider({ children }: PropsWithChildren) {
     }),
     [
       isLoading,
+      activeAccountId,
       profile,
       records,
       favoritePracticeMenuIds,
@@ -497,6 +514,7 @@ export function AppStateProvider({ children }: PropsWithChildren) {
       uiTheme,
       backgroundTheme,
       theme,
+      setActiveAccountId,
       saveProfile,
       saveProfileAndUiTheme,
       saveProfileAndDisplaySettings,

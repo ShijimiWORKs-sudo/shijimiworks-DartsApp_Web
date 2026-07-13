@@ -3,6 +3,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import type { Dispatch, ReactNode, SetStateAction } from 'react';
 import { Text, View } from 'react-native';
 
+import { useAppState } from './AppStateContext';
 import type { GameRepositories } from '../features/game/application/ports';
 import { createGameServices } from '../features/game/application/services';
 import type { GameServices } from '../features/game/application/services';
@@ -82,6 +83,7 @@ function GameDatabaseRepositoryBridge({
   setValue: Dispatch<SetStateAction<GameDatabaseContextValue>>;
 }) {
   const db = useSQLiteContext() as GameDatabaseConnection;
+  const { activeAccountId, setActiveAccountId } = useAppState();
   const repositories = useMemo(() => createGameRepositories(db), [db]);
   const services = useMemo(() => createGameServices(db), [db]);
 
@@ -104,6 +106,29 @@ function GameDatabaseRepositoryBridge({
       });
     };
   }, [repositories, services, setValue]);
+
+  useEffect(() => {
+    if (!activeAccountId) {
+      return;
+    }
+
+    let mounted = true;
+    const accountId = activeAccountId;
+
+    async function repairMissingActiveAccount() {
+      const overview = await services.account.getAccountById(accountId);
+
+      if (mounted && !overview) {
+        await setActiveAccountId(null);
+      }
+    }
+
+    void repairMissingActiveAccount();
+
+    return () => {
+      mounted = false;
+    };
+  }, [activeAccountId, services, setActiveAccountId]);
 
   return <>{children}</>;
 }

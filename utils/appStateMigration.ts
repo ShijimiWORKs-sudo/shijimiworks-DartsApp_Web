@@ -12,7 +12,7 @@ import type {
 import { defaultBackgroundTheme, defaultUiTheme } from '../constants/theme';
 import { sortFormPhotoAdviceHistories } from './formPhotoAdviceHistory';
 
-export const schemaVersion = 9;
+export const schemaVersion = 10;
 
 export const defaultPracticeFilterState: PracticeFilterState = {
   level: 'all',
@@ -30,6 +30,7 @@ export function migrateAppState(
   if (!parsedState) {
     return {
       schemaVersion,
+      activeAccountId: null,
       profile: legacyState.profile,
       records: sortRecords(legacyState.records),
       favoritePracticeMenuIds: legacyState.favoritePracticeMenuIds ?? [],
@@ -46,6 +47,7 @@ export function migrateAppState(
 
   return {
     schemaVersion,
+    activeAccountId: safeStringOrNull(parsedState.activeAccountId),
     profile: parsedState.profile ?? legacyState.profile,
     records: sortRecords(safeRecords(parsedState.records, legacyState.records)),
     favoritePracticeMenuIds: safeStringArray(parsedState.favoritePracticeMenuIds),
@@ -96,6 +98,10 @@ function safeRecords(
 
 function safeStringArray(value: string[] | undefined) {
   return Array.isArray(value) ? value.filter((item) => typeof item === 'string') : [];
+}
+
+function safeStringOrNull(value: unknown) {
+  return typeof value === 'string' && value.length > 0 ? value : null;
 }
 
 function safeConsultHistories(value: ConsultHistory[] | undefined) {

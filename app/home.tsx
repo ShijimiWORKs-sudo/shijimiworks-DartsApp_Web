@@ -4,6 +4,9 @@ import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { AppButton } from '../components/AppButton';
 import { Card } from '../components/Card';
+import { AccountLocalNotice } from '../components/account/AccountLocalNotice';
+import { AccountSummaryCard } from '../components/account/AccountSummaryCard';
+import { RatingStatusCard } from '../components/account/RatingStatusCard';
 import { RoundIconButton } from '../components/RoundIconButton';
 import { ScreenShell } from '../components/ScreenShell';
 import { SectionTitle } from '../components/SectionTitle';
@@ -13,6 +16,7 @@ import { levelLabels } from '../constants/levels';
 import { colors } from '../constants/theme';
 import { useAppState } from '../contexts/AppStateContext';
 import { useGameDatabase } from '../contexts/GameDatabaseContext';
+import type { AccountOverview } from '../features/account/domain';
 import type { CountUpGameState } from '../features/game/domain/countUp';
 import type { ZeroOneGameState } from '../features/game/domain/zeroOne';
 import { calculateAnalysisSummary } from '../utils/analyzePracticeRecords';
@@ -39,7 +43,9 @@ export default function HomeScreen() {
   const router = useRouter();
   const { services } = useGameDatabase();
   const [activeGame, setActiveGame] = useState<ActiveGame | null>(null);
+  const [accountOverview, setAccountOverview] = useState<AccountOverview | null>(null);
   const {
+    activeAccountId,
     isLoading,
     profile,
     records,
@@ -61,14 +67,15 @@ export default function HomeScreen() {
     useCallback(() => {
       let mounted = true;
 
-      async function loadActiveGame() {
+      async function loadHomeData() {
         if (!services) {
           return;
         }
 
-        const [countUp, zeroOne] = await Promise.all([
+        const [countUp, zeroOne, account] = await Promise.all([
           services.countUp.getActiveGame(),
           services.zeroOne.getActiveGame(),
+          services.account.getActiveAccount(activeAccountId),
         ]);
         if (mounted) {
           setActiveGame(
@@ -78,14 +85,15 @@ export default function HomeScreen() {
                 ? { mode: 'count_up', game: countUp }
                 : null,
           );
+          setAccountOverview(account);
         }
       }
 
-      void loadActiveGame();
+      void loadHomeData();
       return () => {
         mounted = false;
       };
-    }, [services]),
+    }, [activeAccountId, services]),
   );
 
   return (
@@ -123,6 +131,30 @@ export default function HomeScreen() {
           <AppButton label="ゲームを始める" onPress={() => router.push('/game')} />
         </View>
       </Card>
+
+      {accountOverview ? (
+        <>
+          <AccountSummaryCard overview={accountOverview} />
+          <RatingStatusCard overview={accountOverview} />
+        </>
+      ) : (
+        <>
+          <AccountLocalNotice />
+          <Card>
+            <SectionTitle
+              title="Account未登録"
+              subtitle="Rating所有者をこの端末に登録できます。"
+              tone="card"
+            />
+            <View style={styles.accountAction}>
+              <AppButton
+                label="ローカルAccount登録"
+                onPress={() => router.push('/account/register')}
+              />
+            </View>
+          </Card>
+        </>
+      )}
 
       {activeGame ? (
         <Pressable
@@ -354,6 +386,9 @@ const styles = StyleSheet.create({
     marginTop: 14,
   },
   gameAction: {
+    marginTop: 14,
+  },
+  accountAction: {
     marginTop: 14,
   },
   recommendTitle: {

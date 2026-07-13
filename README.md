@@ -8,6 +8,7 @@ MVP v0.1 では実データ連携やAI連携は行わず、端末内ローカル
 
 - 初期設定: レーティング、利用機種、主な悩みを保存
 - ゲーム: COUNT-UPと単独01の開始、再開、手入力、undo/redo、一時停止、中断、結果表示
+- Account: 端末内ローカルAccountでRating所有者を識別
 - 練習メニュー: レベル、悩み、ゲーム種別に応じたメニュー表示
 - おすすめ練習: プロフィールと記録に基づく固定ロジック推薦
 - 練習記録: 入力、一覧、詳細、編集、削除
@@ -163,16 +164,18 @@ npm test
 npm run validate:data
 ```
 
-## Game Database / COUNT-UP / 01
+## Game Database / COUNT-UP / 01 / Account / Rating Foundation
 
 Phase 1では、後続のCOUNT-UP / 01 / CRICKET / MATCH実装に向けたSQLiteゲーム基盤を追加しています。
 Phase 2では、COUNT-UPの縦断実装を追加しています。
-Phase 3では、1人用の単独01縦断実装を追加します。
+Phase 3では、1人用の単独01縦断実装を追加しています。
+Phase 4では、ローカルAccount、OWNER紐付け、Rating Profile、単独Rating候補判定の基盤を追加します。
 
 - DBファイル名: `dartsapp_games.db`
 - 保存方式: `expo-sqlite`
 - migration管理: `PRAGMA user_version` と `db_migrations`
 - v1 migration: `features/game/infrastructure/sqlite/migrations/001_initial.ts`
+- v2 migration: `features/game/infrastructure/sqlite/migrations/002_account_rating_foundation.ts`
 - SQL正本: `docs/specs/DartsApp_DB_v1_schema.sql`
 
 DB初期化時に以下を適用します。
@@ -207,9 +210,20 @@ COUNT-UPでできること:
 - CHECKOUT時は結果を保存し、`/game/01/[gameId]/result` へ遷移
 - 15ラウンド終了時にCHECKOUTしていない場合はround limitとして完了
 - 完了時に `game_player_results`、`integration_outbox`、`practice_record_links` を作成
-- 単独01はDartsApp Ratingの正式計算対象外
+- 初回Rating確定前はRating対象外
+- 初回Rating確定後はAccount OWNERの正常完了ゲームをRating評価候補として保存
 
-CRICKET、MATCH、Rating表示画面は次フェーズ以降で実装します。
+Account / Rating基盤:
+
+- `/account/register` で端末内ローカルAccountを登録
+- `/account/profile` でAccount状態、OWNER紐付け、Rating状態を表示
+- `/account/rating-status` で初回MATCH測定状態と単独Rating対象可否を表示
+- Account登録はゲーム開始の必須条件ではありません
+- GUESTには正式Rating Profile、Rating Evaluation、Rating Snapshotを作成しません
+- COUNT-UPは常にRating対象外です
+- Rating計算本体、Snapshot更新エンジン、Rating履歴画面の完全実装は後続フェーズで扱います
+
+CRICKET本体、MATCH本体、効果音・アワード動画は次フェーズ以降で実装します。
 
 ## App identity
 
@@ -245,6 +259,7 @@ CRICKET、MATCH、Rating表示画面は次フェーズ以降で実装します�
 - `docs/implementation/PHASE_1_REPORT.md`
 - `docs/implementation/PHASE_2_REPORT.md`
 - `docs/implementation/PHASE_3_REPORT.md`
+- `docs/implementation/PHASE_4_REPORT.md`
 - `docs/implementation/OPEN_QUESTIONS.md`
 - `docs/EAS_BUILD_GUIDE.md`
 - `docs/TESTFLIGHT_PREP.md`

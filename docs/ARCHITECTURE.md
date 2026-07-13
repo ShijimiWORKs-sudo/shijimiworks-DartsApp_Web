@@ -56,6 +56,7 @@ Expo Router のルート画面を配置します。
 - `consultHistories`
 - `formPhotoAdviceResults`
 - `boardReferenceImages`
+- `activeAccountId`
 
 `GameDatabaseContext.tsx` はゲーム領域のSQLite接続、Repository入口、Service入口を提供します。
 
@@ -67,6 +68,8 @@ Expo Router のルート画面を配置します。
 - `PlayerRepository` / `MatchRepository` / `GameRepository` / `RatingRepository` / `IntegrationOutboxRepository`
 - `CountUpGameService`
 - `ZeroOneGameService`
+- `AccountService`
+- `StandaloneRatingCandidateService`
 
 `AppStateContext` へ投擲履歴やMATCH履歴を混在させません。ゲームの正本は `dartsapp_games.db` のSQLite、既存MVP状態の正本はAsyncStorageです。
 
@@ -85,6 +88,7 @@ SQLite DB:
 - ファイル名: `dartsapp_games.db`
 - migration: `PRAGMA user_version` と `db_migrations`
 - v1: 19テーブル、Outbox、投擲の `client_action_id` 冪等制約、進行中GAME/MATCHの一意制約
+- v2: Account、OWNER紐付け、Rating Profile、Rating Evaluation v2、Rating Snapshot v2、migration orphan保存
 - SQL正本: `docs/specs/DartsApp_DB_v1_schema.sql`
 
 COUNT-UP:
@@ -108,7 +112,32 @@ COUNT-UP:
 - BUSTはdart行を保存したままTURNを終了し、`turns.raw_score` に実投得点、`turns.applied_score` に0を保存する
 - CHECKOUTまたは15ラウンド上限で `game_player_results`、`integration_outbox`、`practice_record_links` を作成する
 - `integration_outbox` は `practice_record_upsert` をpendingで作成し、consumerは後続フェーズに残す
-- Rating用の `rating_evaluations`、`rating_snapshots`、`rating_recalculate` Outboxは作成しない
+- 初回Rating確定前は `rating_candidate = 0`
+- 初回Rating確定後、Account OWNERの完了ゲームは `rating_candidate = 1` とし、pending `rating_evaluations` と `rating_recalculate` Outboxを作成する
+- Rating計算本体とSnapshot適用はPhase 4では実行しない
+
+## features/account/
+
+Account機能は端末内でRating所有者を識別するためのローカル基盤です。
+
+- `domain/`: Account状態、入力検証、email normalize
+- `application/`: Account登録、active Account取得、OWNER紐付け、Rating Profile初期化
+- `infrastructure/sqlite/`: AccountとRating ProfileのSQLite Repository
+
+Phase 4では`auth_provider = 'local'`のみを扱い、パスワード、クラウド認証、本人確認トークンは保存しません。
+
+OWNER PlayerはAccountに紐づきます。GUEST Playerは`account_id = NULL`のままで、正式Rating Profile、Rating Evaluation、Rating Snapshotを持ちません。
+
+## features/game/domain/rating/
+
+Phase 4ではRating計算本体ではなく、評価候補判定の境界を追加します。
+
+- MATCHは初回3件でRatingを確定する将来評価元
+- 単独01と単独CRICKETはRating確定後だけ評価候補
+- COUNT-UP、道場、CRICKET COUNT-UPは対象外
+- 除外理由は `ACCOUNT_NOT_REGISTERED`、`OWNER_NOT_LINKED`、`INITIAL_RATING_NOT_ESTABLISHED` などのreason codeで扱う
+
+`rating_evaluations` は `source_type = match | standalone_zero_one | standalone_cricket` を保持します。単独ゲームは `source_weight_milli = 500`、MATCHは `1000` です。
 
 ## utils/
 
@@ -156,7 +185,8 @@ AsyncStorage key:
 
 ```ts
 {
-  schemaVersion: 9,
+  schemaVersion: 10,
+  activeAccountId: string | null,
   profile: UserProfile | null,
   records: PracticeRecord[], // photoScore?: PhotoScoreEntry を含む場合あり
   favoritePracticeMenuIds: string[],
@@ -168,6 +198,15 @@ AsyncStorage key:
   backgroundTheme: 'black' | 'brown' | 'purple' | 'orange' | 'white'
 }
 ```
+
+## schemaVersion 10
+
+Phase 4で `activeAccountId: string | null` を追加します。
+
+- schemaVersion 9以前からのmigrationでは `activeAccountId = null`
+- SQLite migration後、active OWNERに紐づくAccountが1件なら設定可能
+- DBに存在しないAccount IDはnullへ修復
+- 既存プロフィール、練習記録、写真スコア、相談履歴、表示設定は維持
 
 ## schemaVersion 9
 

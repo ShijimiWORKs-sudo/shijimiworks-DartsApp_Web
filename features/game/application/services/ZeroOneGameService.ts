@@ -22,6 +22,7 @@ import type {
   GameDatabaseConnection,
   GameDatabaseExecutor,
 } from '../../infrastructure/sqlite/types';
+import { StandaloneRatingCandidateService } from './StandaloneRatingCandidateService';
 import type { ZeroOneGameServicePort, ZeroOneLastSettings } from './ZeroOneGameServicePort';
 
 export class ZeroOneActiveGameExistsError extends Error {
@@ -102,6 +103,13 @@ export class ZeroOneGameService implements ZeroOneGameServicePort {
 
       const owner = await getOrCreateOwner(transaction, input.ownerName ?? 'PLAYER 1');
       const now = new Date().toISOString();
+      const ratingDecision = await new StandaloneRatingCandidateService(
+        transaction,
+      ).buildGameStartDecision({
+        mode: 'zero_one',
+        ownerPlayerId: owner.id,
+        gameStartedAt: now,
+      });
       gameId = createGameId();
       const gamePlayerId = createGameId();
       const roundId = createGameId();
@@ -113,14 +121,18 @@ export class ZeroOneGameService implements ZeroOneGameServicePort {
            player_count, current_round_no, current_turn_sequence_no, current_player_id,
            rating_candidate, config_json, row_version, started_at, created_at, updated_at
          )
-         VALUES (?, 'zero_one', 'in_progress', ?, ?, ?, ?, 1, 1, 1, ?, 0, ?, 0, ?, ?, ?)`,
+         VALUES (?, 'zero_one', 'in_progress', ?, ?, ?, ?, 1, 1, 1, ?, ?, ?, 0, ?, ?, ?)`,
         gameId,
         ZERO_ONE_MAX_ROUNDS,
         input.bullRule,
         input.outRule,
         input.startScore,
         owner.id,
-        JSON.stringify({ version: 1, ratingExcluded: true }),
+        ratingDecision.ratingCandidate,
+        JSON.stringify({
+          version: 2,
+          rating: ratingDecision.configJsonPatch.rating,
+        }),
         now,
         now,
         now,
@@ -874,9 +886,10 @@ async function completeGame(
 
   const turns = await loadTurns(db, context.gameId);
   const result = summarizeZeroOneGame(turns, context.startScore, completionReason);
+  const ratingState = await loadGameRatingState(db, context.gameId);
   const extraStats = {
-    version: 1,
-    ratingExcluded: true,
+    version: 2,
+    ratingExcluded: ratingState.rating_candidate !== 1,
     completionReason,
     outRule: context.outRule,
     startScore: context.startScore,
@@ -999,7 +1012,7 @@ async function completeGame(
     bullRule: context.bullRule,
     outRule: context.outRule,
     machineType,
-    ratingExcluded: true,
+    ratingExcluded: ratingState.rating_candidate !== 1,
   };
 
   await db.runAsync(
@@ -1037,6 +1050,146 @@ async function completeGame(
     finalRemainingScore: result.finalRemainingScore,
     ppdMilli: result.ppdMilli,
   });
+
+  await createPendingStandaloneZeroOneEvaluation(db, context, result, ratingState, now);
+}
+
+type GameRatingState = {
+  rating_candidate: number;
+  started_at: string;
+};
+
+async function loadGameRatingState(
+  db: GameDatabaseExecutor,
+  gameId: string,
+): Promise<GameRatingState> {
+  const row = await db.getFirstAsync<GameRatingState>(
+    `SELECT rating_candidate, started_at
+     FROM game_sessions
+     WHERE id = ?
+     LIMIT 1`,
+    gameId,
+  );
+
+  return {
+    rating_candidate: row?.rating_candidate ?? 0,
+    started_at: row?.started_at ?? new Date().toISOString(),
+  };
+}
+
+async function createPendingStandaloneZeroOneEvaluation(
+  db: GameDatabaseExecutor,
+  context: MutableTurnContext,
+  result: ZeroOneResult,
+  ratingState: GameRatingState,
+  now: string,
+) {
+  if (ratingState.rating_candidate !== 1 || !context.playerId) {
+    return;
+  }
+
+  const eligibility = await new StandaloneRatingCandidateService(db).evaluateGameStart({
+    mode: 'zero_one',
+    ownerPlayerId: context.playerId,
+    gameStartedAt: ratingState.started_at,
+  });
+
+  if (!eligibility.eligible) {
+    return;
+  }
+
+  const account = await db.getFirstAsync<{ account_id: string }>(
+    `SELECT account_id
+     FROM players
+     WHERE id = ? AND player_type = 'owner' AND account_id IS NOT NULL
+     LIMIT 1`,
+    context.playerId,
+  );
+
+  if (!account?.account_id) {
+    return;
+  }
+
+  const evaluationId = createGameId();
+  await db.runAsync(
+    `INSERT OR IGNORE INTO rating_evaluations(
+       id, account_id, player_id, source_type, source_match_id, source_game_id,
+       source_revision, status, candidate_flag, match_result, zero_one_game_count,
+       zero_one_ppd_milli, cricket_game_count, cricket_mpr_milli, total_darts,
+       total_rounds, source_weight_milli, auto_detected_darts, adjusted_darts,
+       fully_manual_darts, correction_count, input_payload_json, created_at
+     )
+     VALUES (?, ?, ?, 'standalone_zero_one', NULL, ?, 1, 'pending', 1, NULL, 1, ?, 0, NULL, ?, ?, 500, 0, 0, ?, 0, ?, ?)`,
+    evaluationId,
+    account.account_id,
+    context.playerId,
+    context.gameId,
+    result.ppdMilli,
+    result.dartsThrown,
+    result.roundsPlayed,
+    result.dartsThrown,
+    JSON.stringify({
+      version: 1,
+      sourceType: 'standalone_zero_one',
+      gameId: context.gameId,
+      finalRemainingScore: result.finalRemainingScore,
+      completionReason: result.completionReason,
+      ppdMilli: result.ppdMilli,
+      threeDartAverageMilli: result.threeDartAverageMilli,
+    }),
+    now,
+  );
+
+  const existingEvaluation = await db.getFirstAsync<{ id: string }>(
+    `SELECT id
+     FROM rating_evaluations
+     WHERE source_type = 'standalone_zero_one'
+       AND source_game_id = ?
+       AND account_id = ?
+       AND source_revision = 1
+     LIMIT 1`,
+    context.gameId,
+    account.account_id,
+  );
+
+  const resolvedEvaluationId = existingEvaluation?.id ?? evaluationId;
+  await db.runAsync(
+    `INSERT OR IGNORE INTO rating_evaluation_games(
+       evaluation_id, game_id, mode, game_no, ppd_milli, three_dart_average_milli,
+       darts_thrown, rounds_count, checkout_flag, bust_count, created_at
+     )
+     VALUES (?, ?, 'zero_one', 1, ?, ?, ?, ?, ?, ?, ?)`,
+    resolvedEvaluationId,
+    context.gameId,
+    result.ppdMilli,
+    result.threeDartAverageMilli,
+    result.dartsThrown,
+    result.roundsPlayed,
+    result.completionReason === 'checkout' ? 1 : 0,
+    result.bustCount,
+    now,
+  );
+
+  await db.runAsync(
+    `INSERT OR IGNORE INTO integration_outbox(
+       id, event_type, aggregate_type, aggregate_id, idempotency_key,
+       payload_json, status, attempt_count, available_at, created_at, updated_at
+     )
+     VALUES (?, 'rating_recalculate', 'game', ?, ?, ?, 'pending', 0, ?, ?, ?)`,
+    createGameId(),
+    context.gameId,
+    `rating-recalculate:${context.gameId}:standalone-zero-one:1`,
+    JSON.stringify({
+      version: 1,
+      sourceType: 'standalone_zero_one',
+      gameId: context.gameId,
+      evaluationId: resolvedEvaluationId,
+      accountId: account.account_id,
+    }),
+    now,
+    now,
+    now,
+  );
 }
 
 async function appendDomainEvent(
