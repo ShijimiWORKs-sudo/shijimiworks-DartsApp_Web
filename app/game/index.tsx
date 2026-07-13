@@ -9,24 +9,44 @@ import { SectionTitle } from '../../components/SectionTitle';
 import { colors } from '../../constants/theme';
 import { useGameDatabase } from '../../contexts/GameDatabaseContext';
 import type { CountUpGameState } from '../../features/game/domain/countUp';
+import type { ZeroOneGameState } from '../../features/game/domain/zeroOne';
+
+type ActiveGame =
+  { mode: 'count_up'; game: CountUpGameState } | { mode: 'zero_one'; game: ZeroOneGameState };
+
+type RecentGame =
+  { mode: 'count_up'; game: CountUpGameState } | { mode: 'zero_one'; game: ZeroOneGameState };
 
 export default function GameHubScreen() {
   const router = useRouter();
   const { services, isAvailable } = useGameDatabase();
-  const [activeGame, setActiveGame] = useState<CountUpGameState | null>(null);
-  const [recentResults, setRecentResults] = useState<CountUpGameState[]>([]);
+  const [activeGame, setActiveGame] = useState<ActiveGame | null>(null);
+  const [recentResults, setRecentResults] = useState<RecentGame[]>([]);
 
   const loadGames = useCallback(async () => {
     if (!services) {
       return;
     }
 
-    const [active, recent] = await Promise.all([
+    const [activeCountUp, activeZeroOne, recentCountUp, recentZeroOne] = await Promise.all([
       services.countUp.getActiveGame(),
+      services.zeroOne.getActiveGame(),
       services.countUp.listRecentResults(5),
+      services.zeroOne.listRecentResults(5),
     ]);
-    setActiveGame(active);
-    setRecentResults(recent);
+    setActiveGame(
+      activeZeroOne
+        ? { mode: 'zero_one', game: activeZeroOne }
+        : activeCountUp
+          ? { mode: 'count_up', game: activeCountUp }
+          : null,
+    );
+    setRecentResults(
+      [
+        ...recentZeroOne.map((game) => ({ mode: 'zero_one' as const, game })),
+        ...recentCountUp.map((game) => ({ mode: 'count_up' as const, game })),
+      ].slice(0, 5),
+    );
   }, [services]);
 
   useFocusEffect(
@@ -37,27 +57,24 @@ export default function GameHubScreen() {
 
   return (
     <ScreenShell>
-      <SectionTitle
-        title="ゲーム"
-        subtitle="Phase 2ではCOUNT-UPの開始、再開、結果確認に対応しています。"
-      />
+      <SectionTitle title="ゲーム" subtitle="COUNT-UPと単独01をDBへ保存しながらプレイできます。" />
 
       {activeGame ? (
         <Pressable
           accessibilityRole="button"
-          onPress={() => router.push(`/game/count-up/${activeGame.gameId}`)}
+          onPress={() => router.push(getPlayRoute(activeGame))}
           style={({ pressed }) => pressed && styles.pressed}
         >
           <Card muted>
             <SectionTitle
-              title={activeGame.status === 'paused' ? '一時停止中のCOUNT-UP' : '進行中のCOUNT-UP'}
-              subtitle={`Round ${activeGame.currentRoundNo} / 8、現在 ${activeGame.totalScore} 点`}
+              title={getActiveTitle(activeGame)}
+              subtitle={getActiveSubtitle(activeGame)}
               tone="card"
             />
             <View style={styles.cardAction}>
               <AppButton
-                label={activeGame.status === 'paused' ? '再開する' : 'ゲームへ戻る'}
-                onPress={() => router.push(`/game/count-up/${activeGame.gameId}`)}
+                label={activeGame.game.status === 'paused' ? '再開する' : 'ゲームへ戻る'}
+                onPress={() => router.push(getPlayRoute(activeGame))}
               />
             </View>
           </Card>
@@ -65,46 +82,44 @@ export default function GameHubScreen() {
       ) : null}
 
       <Card>
-        <SectionTitle title="ゲームモード" subtitle="まずはCOUNT-UPを記録できます。" tone="card" />
+        <SectionTitle title="ゲームモード" subtitle="単独練習を記録できます。" tone="card" />
         <View style={styles.modeList}>
           <AppButton
             label="COUNT-UPを始める"
             onPress={() => router.push('/game/count-up/settings')}
             disabled={!isAvailable}
           />
-          <View style={styles.disabledMode}>
-            <Text style={styles.disabledModeTitle}>01 GAME</Text>
-            <Text style={styles.disabledModeText}>Phase 3以降で実装予定</Text>
-          </View>
+          <AppButton
+            label="01 GAMEを始める"
+            onPress={() => router.push('/game/01/settings')}
+            disabled={!isAvailable}
+            variant="secondary"
+          />
           <View style={styles.disabledMode}>
             <Text style={styles.disabledModeTitle}>CRICKET</Text>
-            <Text style={styles.disabledModeText}>Phase 3以降で実装予定</Text>
+            <Text style={styles.disabledModeText}>Phase 4以降で実装予定</Text>
           </View>
         </View>
       </Card>
 
       <Card>
-        <SectionTitle title="最近のCOUNT-UP" subtitle="完了済みゲームを表示します。" tone="card" />
+        <SectionTitle title="最近のゲーム" subtitle="完了済みゲームを表示します。" tone="card" />
         {recentResults.length > 0 ? (
           <View style={styles.resultList}>
-            {recentResults.map((game) => (
+            {recentResults.map((recent) => (
               <Pressable
-                key={game.gameId}
+                key={`${recent.mode}-${recent.game.gameId}`}
                 accessibilityRole="button"
-                onPress={() => router.push(`/game/count-up/${game.gameId}/result`)}
+                onPress={() => router.push(getResultRoute(recent))}
                 style={({ pressed }) => [styles.resultRow, pressed && styles.pressed]}
               >
-                <Text style={styles.resultScore}>
-                  {game.result?.totalScore ?? game.totalScore} 点
-                </Text>
-                <Text style={styles.resultMeta}>
-                  Bull {game.result?.bullCount ?? 0} / {game.bullRule}
-                </Text>
+                <Text style={styles.resultScore}>{getResultScore(recent)}</Text>
+                <Text style={styles.resultMeta}>{getResultMeta(recent)}</Text>
               </Pressable>
             ))}
           </View>
         ) : (
-          <Text style={styles.emptyText}>まだ完了したCOUNT-UPはありません。</Text>
+          <Text style={styles.emptyText}>まだ完了したゲームはありません。</Text>
         )}
       </Card>
     </ScreenShell>
@@ -171,3 +186,41 @@ const styles = StyleSheet.create({
     opacity: 0.72,
   },
 });
+
+function getPlayRoute(active: ActiveGame) {
+  return active.mode === 'zero_one'
+    ? `/game/01/${active.game.gameId}`
+    : `/game/count-up/${active.game.gameId}`;
+}
+
+function getResultRoute(recent: RecentGame) {
+  return recent.mode === 'zero_one'
+    ? `/game/01/${recent.game.gameId}/result`
+    : `/game/count-up/${recent.game.gameId}/result`;
+}
+
+function getActiveTitle(active: ActiveGame) {
+  const prefix = active.game.status === 'paused' ? '一時停止中の' : '進行中の';
+  return `${prefix}${active.mode === 'zero_one' ? '01 GAME' : 'COUNT-UP'}`;
+}
+
+function getActiveSubtitle(active: ActiveGame) {
+  if (active.mode === 'zero_one') {
+    return `Round ${active.game.currentRoundNo} / 15、残り ${active.game.currentRemainingScore} 点`;
+  }
+  return `Round ${active.game.currentRoundNo} / 8、現在 ${active.game.totalScore} 点`;
+}
+
+function getResultScore(recent: RecentGame) {
+  if (recent.mode === 'zero_one') {
+    return `01 残り ${recent.game.result?.finalRemainingScore ?? recent.game.currentRemainingScore} 点`;
+  }
+  return `COUNT-UP ${recent.game.result?.totalScore ?? recent.game.totalScore} 点`;
+}
+
+function getResultMeta(recent: RecentGame) {
+  if (recent.mode === 'zero_one') {
+    return `PPD ${((recent.game.result?.ppdMilli ?? 0) / 1000).toFixed(1)} / ${recent.game.outRule}`;
+  }
+  return `Bull ${recent.game.result?.bullCount ?? 0} / ${recent.game.bullRule}`;
+}

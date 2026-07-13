@@ -8,7 +8,7 @@ Expo Router のルート画面を配置します。
 
 - `app/index.tsx`: 初期設定
 - `app/home.tsx`: ホーム、ゲーム開始/再開導線
-- `app/game*.tsx`: ゲームハブ、COUNT-UP設定、COUNT-UPプレイ、COUNT-UP結果
+- `app/game*.tsx`: ゲームハブ、COUNT-UP設定/プレイ/結果、01設定/プレイ/結果
 - `app/practice*.tsx`: 練習メニューと履歴
 - `app/record.tsx`: 練習記録入力
 - `app/records*.tsx`: 練習記録一覧/詳細/編集
@@ -66,6 +66,7 @@ Expo Router のルート画面を配置します。
 - 初期化エラー
 - `PlayerRepository` / `MatchRepository` / `GameRepository` / `RatingRepository` / `IntegrationOutboxRepository`
 - `CountUpGameService`
+- `ZeroOneGameService`
 
 `AppStateContext` へ投擲履歴やMATCH履歴を混在させません。ゲームの正本は `dartsapp_games.db` のSQLite、既存MVP状態の正本はAsyncStorageです。
 
@@ -73,11 +74,11 @@ Expo Router のルート画面を配置します。
 
 ゲーム機能は画面から分離し、次のレイヤーに分けます。
 
-- `domain/`: enum値、ドメイン型、COUNT-UPスコア計算、ID生成、ゲーム領域エラー
-- `application/`: Repository port、COUNT-UPアプリケーションサービス
+- `domain/`: enum値、ドメイン型、COUNT-UP/01スコア計算、ID生成、ゲーム領域エラー
+- `application/`: Repository port、COUNT-UP/01アプリケーションサービス
 - `infrastructure/sqlite/`: DB初期化、migration、Repository実装、row mapper
 
-Phase 2ではCOUNT-UPの縦断実装を追加しています。画面は `CountUpGameService` を通じてSQLiteへ保存し、既存AsyncStorageのPracticeRecordへは直接書き込みません。完了時は `integration_outbox` と `practice_record_links` にpending状態を作り、後続フェーズの同期処理境界にします。
+Phase 2ではCOUNT-UPの縦断実装を追加しています。Phase 3では単独01の縦断実装を追加します。画面は `CountUpGameService` または `ZeroOneGameService` を通じてSQLiteへ保存し、既存AsyncStorageのPracticeRecordへは直接書き込みません。完了時は `integration_outbox` と `practice_record_links` にpending状態を作り、後続フェーズの同期処理境界にします。
 
 SQLite DB:
 
@@ -94,6 +95,20 @@ COUNT-UP:
 - `client_action_id` で二重入力を防止
 - undo/redoは `darts.status` を `active` / `voided` に更新し、物理削除しない
 - 8ラウンド確定時に `game_player_results`、`integration_outbox`、`practice_record_links` を作成
+
+単独01:
+
+- 単独ゲームとして `game_sessions.mode = 'zero_one'` に保存
+- `max_rounds = 15`、1プレイヤー、Rating対象外
+- 開始点は `zero_one_start_score` に 301 / 501 / 701 / 901 を保存
+- アウト方式は `out_rule` に `single_out` または `master_out` を保存
+- Bull方式は `bull_rule` に保存し、FAT BULL / SEPARATE BULLの得点計算に使う
+- 手入力ダーツは `darts.input_source = 'manual_segment'`、`is_rating_eligible = 0`
+- 投擲得点は入力値ではなく、area、segment、Bull方式からドメイン層で再計算する
+- BUSTはdart行を保存したままTURNを終了し、`turns.raw_score` に実投得点、`turns.applied_score` に0を保存する
+- CHECKOUTまたは15ラウンド上限で `game_player_results`、`integration_outbox`、`practice_record_links` を作成する
+- `integration_outbox` は `practice_record_upsert` をpendingで作成し、consumerは後続フェーズに残す
+- Rating用の `rating_evaluations`、`rating_snapshots`、`rating_recalculate` Outboxは作成しない
 
 ## utils/
 

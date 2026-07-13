@@ -7,7 +7,7 @@ MVP v0.1 では実データ連携やAI連携は行わず、端末内ローカル
 ## MVPでできること
 
 - 初期設定: レーティング、利用機種、主な悩みを保存
-- ゲーム: COUNT-UPの開始、再開、手入力、undo/redo、一時停止、中断、結果表示
+- ゲーム: COUNT-UPと単独01の開始、再開、手入力、undo/redo、一時停止、中断、結果表示
 - 練習メニュー: レベル、悩み、ゲーム種別に応じたメニュー表示
 - おすすめ練習: プロフィールと記録に基づく固定ロジック推薦
 - 練習記録: 入力、一覧、詳細、編集、削除
@@ -163,10 +163,11 @@ npm test
 npm run validate:data
 ```
 
-## Game Database / COUNT-UP
+## Game Database / COUNT-UP / 01
 
 Phase 1では、後続のCOUNT-UP / 01 / CRICKET / MATCH実装に向けたSQLiteゲーム基盤を追加しています。
 Phase 2では、COUNT-UPの縦断実装を追加しています。
+Phase 3では、1人用の単独01縦断実装を追加します。
 
 - DBファイル名: `dartsapp_games.db`
 - 保存方式: `expo-sqlite`
@@ -195,7 +196,20 @@ COUNT-UPでできること:
 - `client_action_id` で投擲入力の冪等性を担保
 - COUNT-UPはRating対象外
 
-01、CRICKET、MATCH、Rating表示画面は次フェーズ以降で実装します。
+単独01でできること:
+
+- `/game` から01 GAMEを開始
+- `/game/01/settings` で開始点、アウト方式、Bull設定を選択
+- 開始点は 301 / 501 / 701 / 901
+- アウト方式は SINGLE OUT / MASTER OUT
+- `/game/01/[gameId]` で手入力、undo/redo、TURN終了、一時停止、再開、中断
+- BUST時は投擲を保存したうえでTURNを即時終了し、残り点をTURN開始時へ戻す
+- CHECKOUT時は結果を保存し、`/game/01/[gameId]/result` へ遷移
+- 15ラウンド終了時にCHECKOUTしていない場合はround limitとして完了
+- 完了時に `game_player_results`、`integration_outbox`、`practice_record_links` を作成
+- 単独01はDartsApp Ratingの正式計算対象外
+
+CRICKET、MATCH、Rating表示画面は次フェーズ以降で実装します。
 
 ## App identity
 
@@ -230,6 +244,7 @@ COUNT-UPでできること:
 - `docs/ARCHITECTURE.md`
 - `docs/implementation/PHASE_1_REPORT.md`
 - `docs/implementation/PHASE_2_REPORT.md`
+- `docs/implementation/PHASE_3_REPORT.md`
 - `docs/implementation/OPEN_QUESTIONS.md`
 - `docs/EAS_BUILD_GUIDE.md`
 - `docs/TESTFLIGHT_PREP.md`
