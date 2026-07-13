@@ -7,7 +7,8 @@ DartsSupportApp MVP v0.1 の構成メモです。
 Expo Router のルート画面を配置します。
 
 - `app/index.tsx`: 初期設定
-- `app/home.tsx`: ホーム
+- `app/home.tsx`: ホーム、ゲーム開始/再開導線
+- `app/game*.tsx`: ゲームハブ、COUNT-UP設定、COUNT-UPプレイ、COUNT-UP結果
 - `app/practice*.tsx`: 練習メニューと履歴
 - `app/record.tsx`: 練習記録入力
 - `app/records*.tsx`: 練習記録一覧/詳細/編集
@@ -56,7 +57,7 @@ Expo Router のルート画面を配置します。
 - `formPhotoAdviceResults`
 - `boardReferenceImages`
 
-`GameDatabaseContext.tsx` はゲーム領域のSQLite接続とRepository入口を提供します。
+`GameDatabaseContext.tsx` はゲーム領域のSQLite接続、Repository入口、Service入口を提供します。
 
 公開する状態:
 
@@ -64,6 +65,7 @@ Expo Router のルート画面を配置します。
 - DB利用可能か
 - 初期化エラー
 - `PlayerRepository` / `MatchRepository` / `GameRepository` / `RatingRepository` / `IntegrationOutboxRepository`
+- `CountUpGameService`
 
 `AppStateContext` へ投擲履歴やMATCH履歴を混在させません。ゲームの正本は `dartsapp_games.db` のSQLite、既存MVP状態の正本はAsyncStorageです。
 
@@ -71,11 +73,11 @@ Expo Router のルート画面を配置します。
 
 ゲーム機能は画面から分離し、次のレイヤーに分けます。
 
-- `domain/`: enum値、ドメイン型、ID生成、ゲーム領域エラー
-- `application/`: Repository port
+- `domain/`: enum値、ドメイン型、COUNT-UPスコア計算、ID生成、ゲーム領域エラー
+- `application/`: Repository port、COUNT-UPアプリケーションサービス
 - `infrastructure/sqlite/`: DB初期化、migration、Repository実装、row mapper
 
-Phase 1では画面実装へ進まず、後続フェーズで使う保存基盤とRepository境界だけを接続しています。
+Phase 2ではCOUNT-UPの縦断実装を追加しています。画面は `CountUpGameService` を通じてSQLiteへ保存し、既存AsyncStorageのPracticeRecordへは直接書き込みません。完了時は `integration_outbox` と `practice_record_links` にpending状態を作り、後続フェーズの同期処理境界にします。
 
 SQLite DB:
 
@@ -83,6 +85,15 @@ SQLite DB:
 - migration: `PRAGMA user_version` と `db_migrations`
 - v1: 19テーブル、Outbox、投擲の `client_action_id` 冪等制約、進行中GAME/MATCHの一意制約
 - SQL正本: `docs/specs/DartsApp_DB_v1_schema.sql`
+
+COUNT-UP:
+
+- 単独ゲームとして `game_sessions.mode = 'count_up'` に保存
+- `max_rounds = 8`、1プレイヤー、Rating対象外
+- 手入力ダーツは `darts.input_source = 'manual_segment'`、`is_rating_eligible = 0`
+- `client_action_id` で二重入力を防止
+- undo/redoは `darts.status` を `active` / `voided` に更新し、物理削除しない
+- 8ラウンド確定時に `game_player_results`、`integration_outbox`、`practice_record_links` を作成
 
 ## utils/
 
@@ -112,6 +123,8 @@ Node.js built-in test runner で pure TypeScript ロジックを検証します�
 - 相談回答ロジック
 - フォーム写真相談ロジック
 - migration
+- COUNT-UPドメイン計算
+- COUNT-UPサービスとSQLite永続化
 - データ整合性
 - 資料検索
 

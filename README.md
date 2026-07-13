@@ -7,6 +7,7 @@ MVP v0.1 では実データ連携やAI連携は行わず、端末内ローカル
 ## MVPでできること
 
 - 初期設定: レーティング、利用機種、主な悩みを保存
+- ゲーム: COUNT-UPの開始、再開、手入力、undo/redo、一時停止、中断、結果表示
 - 練習メニュー: レベル、悩み、ゲーム種別に応じたメニュー表示
 - おすすめ練習: プロフィールと記録に基づく固定ロジック推薦
 - 練習記録: 入力、一覧、詳細、編集、削除
@@ -162,9 +163,10 @@ npm test
 npm run validate:data
 ```
 
-## Game Database Foundation
+## Game Database / COUNT-UP
 
 Phase 1では、後続のCOUNT-UP / 01 / CRICKET / MATCH実装に向けたSQLiteゲーム基盤を追加しています。
+Phase 2では、COUNT-UPの縦断実装を追加しています。
 
 - DBファイル名: `dartsapp_games.db`
 - 保存方式: `expo-sqlite`
@@ -183,7 +185,17 @@ PRAGMA busy_timeout = 5000;
 
 ゲーム領域の正本はSQLiteです。既存プロフィール、練習記録、写真スコア、相談履歴、表示設定は引き続きAsyncStorageの `AppState` に保持します。SQLiteから既存PracticeRecordへ反映する将来連携は `integration_outbox` を境界にします。
 
-Phase 1ではゲーム画面は未実装です。`/game`、COUNT-UP、01、CRICKET、MATCH、Rating表示画面は次フェーズ以降で実装します。
+COUNT-UPでできること:
+
+- `/game` からCOUNT-UPを開始
+- `/game/count-up/settings` でBull設定を選択
+- `/game/count-up/[gameId]` で手入力、undo/redo、ラウンド確定、一時停止、再開、中断
+- 8ラウンド確定で `/game/count-up/[gameId]/result` に結果表示
+- 完了時に `game_player_results` と `integration_outbox` を作成
+- `client_action_id` で投擲入力の冪等性を担保
+- COUNT-UPはRating対象外
+
+01、CRICKET、MATCH、Rating表示画面は次フェーズ以降で実装します。
 
 ## App identity
 
@@ -217,6 +229,7 @@ Phase 1ではゲーム画面は未実装です。`/game`、COUNT-UP、01、CRICK
 - `docs/ROUTES.md`
 - `docs/ARCHITECTURE.md`
 - `docs/implementation/PHASE_1_REPORT.md`
+- `docs/implementation/PHASE_2_REPORT.md`
 - `docs/implementation/OPEN_QUESTIONS.md`
 - `docs/EAS_BUILD_GUIDE.md`
 - `docs/TESTFLIGHT_PREP.md`

@@ -4,6 +4,8 @@ import type { Dispatch, ReactNode, SetStateAction } from 'react';
 import { Text, View } from 'react-native';
 
 import type { GameRepositories } from '../features/game/application/ports';
+import { createGameServices } from '../features/game/application/services';
+import type { GameServices } from '../features/game/application/services';
 import {
   GAME_DATABASE_FILE_NAME,
   initializeGameDatabase,
@@ -16,6 +18,7 @@ type GameDatabaseContextValue = {
   isAvailable: boolean;
   initializationError: Error | null;
   repositories: GameRepositories | null;
+  services: GameServices | null;
 };
 
 const GameDatabaseContext = createContext<GameDatabaseContextValue>({
@@ -23,6 +26,7 @@ const GameDatabaseContext = createContext<GameDatabaseContextValue>({
   isAvailable: false,
   initializationError: null,
   repositories: null,
+  services: null,
 });
 
 export function GameDatabaseProvider({ children }: { children: ReactNode }) {
@@ -31,6 +35,7 @@ export function GameDatabaseProvider({ children }: { children: ReactNode }) {
     isAvailable: false,
     initializationError: null,
     repositories: null,
+    services: null,
   });
 
   const handleInit = useCallback(async (db: GameDatabaseConnection) => {
@@ -43,6 +48,7 @@ export function GameDatabaseProvider({ children }: { children: ReactNode }) {
       isAvailable: false,
       initializationError: error,
       repositories: null,
+      services: null,
     });
   }, []);
 
@@ -77,6 +83,7 @@ function GameDatabaseRepositoryBridge({
 }) {
   const db = useSQLiteContext() as GameDatabaseConnection;
   const repositories = useMemo(() => createGameRepositories(db), [db]);
+  const services = useMemo(() => createGameServices(db), [db]);
 
   useEffect(() => {
     setValue({
@@ -84,6 +91,7 @@ function GameDatabaseRepositoryBridge({
       isAvailable: true,
       initializationError: null,
       repositories,
+      services,
     });
 
     return () => {
@@ -92,9 +100,10 @@ function GameDatabaseRepositoryBridge({
         isAvailable: false,
         initializationError: null,
         repositories: null,
+        services: null,
       });
     };
-  }, [repositories, setValue]);
+  }, [repositories, services, setValue]);
 
   return <>{children}</>;
 }
