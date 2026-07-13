@@ -1,4 +1,5 @@
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
+import { useCallback, useState } from 'react';
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { AppButton } from '../components/AppButton';
@@ -11,6 +12,8 @@ import { conditionLabels, gameLabels, machineLabels } from '../constants/labels'
 import { levelLabels } from '../constants/levels';
 import { colors } from '../constants/theme';
 import { useAppState } from '../contexts/AppStateContext';
+import { useGameDatabase } from '../contexts/GameDatabaseContext';
+import type { CountUpGameState } from '../features/game/domain/countUp';
 import { calculateAnalysisSummary } from '../utils/analyzePracticeRecords';
 import { recommendPracticeMenus } from '../utils/recommendPracticeMenus';
 
@@ -30,6 +33,8 @@ const menuLinks = [
 
 export default function HomeScreen() {
   const router = useRouter();
+  const { services } = useGameDatabase();
+  const [activeGame, setActiveGame] = useState<CountUpGameState | null>(null);
   const {
     isLoading,
     profile,
@@ -47,6 +52,28 @@ export default function HomeScreen() {
   const recommendation = recommendPracticeMenus(profile, records);
   const recommended = recommendation.todayMenus[0];
   const recommendedMenu = recommended?.menu;
+
+  useFocusEffect(
+    useCallback(() => {
+      let mounted = true;
+
+      async function loadActiveGame() {
+        if (!services) {
+          return;
+        }
+
+        const game = await services.countUp.getActiveGame();
+        if (mounted) {
+          setActiveGame(game);
+        }
+      }
+
+      void loadActiveGame();
+      return () => {
+        mounted = false;
+      };
+    }, [services]),
+  );
 
   return (
     <ScreenShell>
@@ -71,6 +98,33 @@ export default function HomeScreen() {
             <AppButton label="初期設定へ戻る" onPress={() => router.push('/')} />
           </View>
         </Card>
+      ) : null}
+
+      <Card muted>
+        <SectionTitle
+          title="ゲームを始める"
+          subtitle="COUNT-UPをDBへ保存しながらプレイできます。"
+          tone="card"
+        />
+        <View style={styles.gameAction}>
+          <AppButton label="ゲームを始める" onPress={() => router.push('/game')} />
+        </View>
+      </Card>
+
+      {activeGame ? (
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => router.push(`/game/count-up/${activeGame.gameId}`)}
+          style={({ pressed }) => pressed && styles.pressed}
+        >
+          <Card>
+            <SectionTitle
+              title={activeGame.status === 'paused' ? 'COUNT-UPを再開' : '進行中のCOUNT-UP'}
+              subtitle={`Round ${activeGame.currentRoundNo} / 8、現在 ${activeGame.totalScore} 点`}
+              tone="card"
+            />
+          </Card>
+        </Pressable>
       ) : null}
 
       <View style={styles.statsRow}>
@@ -264,6 +318,9 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   setupAction: {
+    marginTop: 14,
+  },
+  gameAction: {
     marginTop: 14,
   },
   recommendTitle: {
