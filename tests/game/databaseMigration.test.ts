@@ -29,19 +29,24 @@ const REQUIRED_TABLES = [
   'rating_snapshots',
   'integration_outbox',
   'practice_record_links',
+  'accounts',
+  'rating_profiles',
+  'rating_migration_orphans',
 ];
 
-test('migration 001 applies to an empty DB and sets user_version to 1', async () => {
+test('game database migrations apply to an empty DB and set user_version to 2', async () => {
   const db = await createMigratedTestDatabase();
   try {
     const version = await db.getFirstAsync<{ user_version: number }>('PRAGMA user_version;');
-    assert.equal(version?.user_version, 1);
+    assert.equal(version?.user_version, 2);
 
-    const migration = await db.getFirstAsync<{ version: number; name: string }>(
-      'SELECT version, name FROM db_migrations WHERE version = ?',
-      1,
+    const migrations = await db.getAllAsync<{ version: number; name: string }>(
+      'SELECT version, name FROM db_migrations ORDER BY version',
     );
-    assert.equal(migration?.name, '001_initial_game_database');
+    assert.deepEqual(
+      migrations.map((migration) => migration.version),
+      [1, 2],
+    );
   } finally {
     db.close();
   }
@@ -59,7 +64,7 @@ test('migration is idempotent and creates all required tables', async () => {
     const names = rows.map((row) => row.name);
     const requiredTableCount = names.filter((name) => REQUIRED_TABLES.includes(name)).length;
 
-    assert.equal(requiredTableCount, 19);
+    assert.equal(requiredTableCount, REQUIRED_TABLES.length);
     for (const tableName of REQUIRED_TABLES) {
       assert.ok(names.includes(tableName), `${tableName} should exist`);
     }
@@ -67,7 +72,7 @@ test('migration is idempotent and creates all required tables', async () => {
     const migrationCount = await db.getFirstAsync<{ count: number }>(
       'SELECT COUNT(*) AS count FROM db_migrations',
     );
-    assert.equal(migrationCount?.count, 1);
+    assert.equal(migrationCount?.count, 2);
   } finally {
     db.close();
   }
@@ -84,7 +89,7 @@ test('foreign_key_check is clean after migration', async () => {
 });
 
 test('migration SQL defines the 19 required tables', () => {
-  for (const tableName of REQUIRED_TABLES) {
+  for (const tableName of REQUIRED_TABLES.slice(0, 19)) {
     assert.match(INITIAL_GAME_DATABASE_SQL, new RegExp(`CREATE TABLE IF NOT EXISTS ${tableName}`));
   }
 });
@@ -115,20 +120,32 @@ test('CHECK constraints reject invalid enum and rating ranges', async () => {
       '2026-07-12T00:00:00.000Z',
       '2026-07-12T00:00:00.000Z',
     );
+    const ownerAccountId = 'account-p1';
+    await db.runAsync(
+      `INSERT INTO accounts(id, display_name, status, auth_provider, created_at, updated_at)
+       VALUES (?, ?, 'local_registered', 'local', ?, ?)`,
+      ownerAccountId,
+      'Owner',
+      '2026-07-12T00:00:00.000Z',
+      '2026-07-12T00:00:00.000Z',
+    );
+    await db.runAsync('UPDATE players SET account_id = ? WHERE id = ?', ownerAccountId, 'p1');
 
     await assertRejectsSql(() =>
       db.runAsync(
         `INSERT INTO rating_snapshots(
-           id, player_id, measurement_status, rating_tenths, confidence_bp,
-           calculation_version, created_at
+           id, account_id, player_id, source_type, measurement_status,
+           rating_tenths, confidence_bp, calculation_version, created_at
          )
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         'rating-invalid',
+        ownerAccountId,
         'p1',
+        'match',
         'standard',
         0,
         1000,
-        1,
+        2,
         '2026-07-12T00:00:00.000Z',
       ),
     );

@@ -4,11 +4,13 @@ import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { AppButton } from '../../../components/AppButton';
 import { Card } from '../../../components/Card';
+import { AccountLocalNotice } from '../../../components/account/AccountLocalNotice';
 import { ScreenShell } from '../../../components/ScreenShell';
 import { SectionTitle } from '../../../components/SectionTitle';
 import { colors } from '../../../constants/theme';
 import { useAppState } from '../../../contexts/AppStateContext';
 import { useGameDatabase } from '../../../contexts/GameDatabaseContext';
+import type { AccountOverview } from '../../../features/account/domain';
 import { ZeroOneActiveGameExistsError } from '../../../features/game/application/services';
 import type { ZeroOneOutRule, ZeroOneStartScore } from '../../../features/game/domain/zeroOne';
 import type { BullRule } from '../../../features/game/domain/types';
@@ -29,11 +31,12 @@ const bullRuleOptions: { value: BullRule; label: string; helper: string }[] = [
 
 export default function ZeroOneSettingsScreen() {
   const router = useRouter();
-  const { profile } = useAppState();
+  const { activeAccountId, profile } = useAppState();
   const { services, isAvailable } = useGameDatabase();
   const [startScore, setStartScore] = useState<ZeroOneStartScore>(501);
   const [outRule, setOutRule] = useState<ZeroOneOutRule>('single_out');
   const [bullRule, setBullRule] = useState<BullRule>('fat_bull');
+  const [accountOverview, setAccountOverview] = useState<AccountOverview | null>(null);
   const [isStarting, setIsStarting] = useState(false);
 
   useFocusEffect(
@@ -45,11 +48,15 @@ export default function ZeroOneSettingsScreen() {
           return;
         }
 
-        const settings = await services.zeroOne.getLastSettings();
+        const [settings, account] = await Promise.all([
+          services.zeroOne.getLastSettings(),
+          services.account.getActiveAccount(activeAccountId),
+        ]);
         if (mounted) {
           setStartScore(settings.startScore);
           setOutRule(settings.outRule);
           setBullRule(settings.bullRule);
+          setAccountOverview(account);
         }
       }
 
@@ -57,7 +64,7 @@ export default function ZeroOneSettingsScreen() {
       return () => {
         mounted = false;
       };
-    }, [services]),
+    }, [activeAccountId, services]),
   );
 
   const startZeroOne = useCallback(async () => {
@@ -130,6 +137,28 @@ export default function ZeroOneSettingsScreen() {
   return (
     <ScreenShell showNav={false}>
       <SectionTitle title="01 GAME設定" subtitle="単独01をDBへ保存しながら開始します。" />
+
+      {accountOverview ? (
+        <Card muted>
+          <SectionTitle
+            title="Rating対象"
+            subtitle={getZeroOneRatingSubtitle(accountOverview)}
+            tone="card"
+          />
+          <Text style={styles.ratingStatus}>{getZeroOneRatingStatus(accountOverview)}</Text>
+        </Card>
+      ) : (
+        <>
+          <AccountLocalNotice />
+          <Card muted>
+            <SectionTitle
+              title="Rating対象外"
+              subtitle="ローカルAccount登録後、初回Rating確定済みの単独01が候補になります。"
+              tone="card"
+            />
+          </Card>
+        </>
+      )}
 
       <Card>
         <SectionTitle title="開始点" subtitle="301 / 501 / 701 / 901から選択します。" tone="card" />
@@ -300,7 +329,23 @@ const styles = StyleSheet.create({
   actions: {
     gap: 10,
   },
+  ratingStatus: {
+    marginTop: 12,
+    color: colors.text,
+    fontSize: 16,
+    fontWeight: '900',
+  },
   pressed: {
     opacity: 0.72,
   },
 });
+
+function getZeroOneRatingSubtitle(accountOverview: AccountOverview) {
+  return accountOverview.ratingProfile.establishedAt
+    ? 'この設定で開始する単独01はRating更新候補として保存されます。'
+    : '初回RatingはEligible MATCH 3件で確定します。確定前の単独01は対象外です。';
+}
+
+function getZeroOneRatingStatus(accountOverview: AccountOverview) {
+  return accountOverview.ratingProfile.establishedAt ? '候補対象' : '対象外';
+}

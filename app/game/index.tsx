@@ -4,10 +4,14 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { AppButton } from '../../components/AppButton';
 import { Card } from '../../components/Card';
+import { AccountLocalNotice } from '../../components/account/AccountLocalNotice';
+import { RatingStatusCard } from '../../components/account/RatingStatusCard';
 import { ScreenShell } from '../../components/ScreenShell';
 import { SectionTitle } from '../../components/SectionTitle';
 import { colors } from '../../constants/theme';
+import { useAppState } from '../../contexts/AppStateContext';
 import { useGameDatabase } from '../../contexts/GameDatabaseContext';
+import type { AccountOverview } from '../../features/account/domain';
 import type { CountUpGameState } from '../../features/game/domain/countUp';
 import type { ZeroOneGameState } from '../../features/game/domain/zeroOne';
 
@@ -19,21 +23,26 @@ type RecentGame =
 
 export default function GameHubScreen() {
   const router = useRouter();
-  const { services, isAvailable } = useGameDatabase();
+  const { activeAccountId } = useAppState();
+  const { accountBootstrapStatus, services, isAvailable } = useGameDatabase();
   const [activeGame, setActiveGame] = useState<ActiveGame | null>(null);
   const [recentResults, setRecentResults] = useState<RecentGame[]>([]);
+  const [accountOverview, setAccountOverview] = useState<AccountOverview | null>(null);
 
   const loadGames = useCallback(async () => {
     if (!services) {
       return;
     }
 
-    const [activeCountUp, activeZeroOne, recentCountUp, recentZeroOne] = await Promise.all([
-      services.countUp.getActiveGame(),
-      services.zeroOne.getActiveGame(),
-      services.countUp.listRecentResults(5),
-      services.zeroOne.listRecentResults(5),
-    ]);
+    const [activeCountUp, activeZeroOne, recentCountUp, recentZeroOne, account] = await Promise.all(
+      [
+        services.countUp.getActiveGame(),
+        services.zeroOne.getActiveGame(),
+        services.countUp.listRecentResults(5),
+        services.zeroOne.listRecentResults(5),
+        services.account.getActiveAccount(activeAccountId),
+      ],
+    );
     setActiveGame(
       activeZeroOne
         ? { mode: 'zero_one', game: activeZeroOne }
@@ -47,7 +56,8 @@ export default function GameHubScreen() {
         ...recentCountUp.map((game) => ({ mode: 'count_up' as const, game })),
       ].slice(0, 5),
     );
-  }, [services]);
+    setAccountOverview(account);
+  }, [activeAccountId, services]);
 
   useFocusEffect(
     useCallback(() => {
@@ -81,6 +91,40 @@ export default function GameHubScreen() {
         </Pressable>
       ) : null}
 
+      {accountOverview ? (
+        <RatingStatusCard overview={accountOverview} />
+      ) : accountBootstrapStatus === 'loading' ? (
+        <Card muted>
+          <SectionTitle
+            title="Rating状態を確認中"
+            subtitle="保存済みAccountとRating Profileを確認しています。"
+            tone="card"
+          />
+        </Card>
+      ) : accountBootstrapStatus === 'temporarilyUnavailable' ? (
+        <Card muted>
+          <SectionTitle
+            title="Account情報を確認できませんでした"
+            subtitle="少し待ってからもう一度お試しください。"
+            tone="card"
+          />
+        </Card>
+      ) : (
+        <>
+          <AccountLocalNotice />
+          <Card>
+            <SectionTitle
+              title="Rating所有者未登録"
+              subtitle="単独01をRating候補にするにはローカルAccountが必要です。"
+              tone="card"
+            />
+            <View style={styles.cardAction}>
+              <AppButton label="Account登録へ" onPress={() => router.push('/account/register')} />
+            </View>
+          </Card>
+        </>
+      )}
+
       <Card>
         <SectionTitle title="ゲームモード" subtitle="単独練習を記録できます。" tone="card" />
         <View style={styles.modeList}>
@@ -89,15 +133,19 @@ export default function GameHubScreen() {
             onPress={() => router.push('/game/count-up/settings')}
             disabled={!isAvailable}
           />
+          <Text style={styles.ratingNote}>COUNT-UPはRating対象外です。</Text>
           <AppButton
             label="01 GAMEを始める"
             onPress={() => router.push('/game/01/settings')}
             disabled={!isAvailable}
             variant="secondary"
           />
+          <Text style={styles.ratingNote}>{getZeroOneRatingNote(accountOverview)}</Text>
           <View style={styles.disabledMode}>
             <Text style={styles.disabledModeTitle}>CRICKET</Text>
-            <Text style={styles.disabledModeText}>Phase 4以降で実装予定</Text>
+            <Text style={styles.disabledModeText}>
+              本体は未実装です。Rating候補化は今後のフェーズで扱います。
+            </Text>
           </View>
         </View>
       </Card>
@@ -142,6 +190,13 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     paddingHorizontal: 14,
     backgroundColor: colors.surfaceMuted,
+  },
+  ratingNote: {
+    marginTop: -4,
+    color: colors.textMuted,
+    fontSize: 12,
+    fontWeight: '700',
+    lineHeight: 18,
   },
   disabledModeTitle: {
     color: colors.text,
@@ -223,4 +278,14 @@ function getResultMeta(recent: RecentGame) {
     return `PPD ${((recent.game.result?.ppdMilli ?? 0) / 1000).toFixed(1)} / ${recent.game.outRule}`;
   }
   return `Bull ${recent.game.result?.bullCount ?? 0} / ${recent.game.bullRule}`;
+}
+
+function getZeroOneRatingNote(accountOverview: AccountOverview | null) {
+  if (!accountOverview) {
+    return '単独01のRating候補化にはAccount登録が必要です。';
+  }
+
+  return accountOverview.ratingProfile.establishedAt
+    ? '単独01はRating更新候補として記録されます。'
+    : '単独01は初回Rating確定後のゲームからRating候補になります。';
 }

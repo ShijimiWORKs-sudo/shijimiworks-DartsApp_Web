@@ -249,7 +249,8 @@ export type PracticeFilterState = {
 };
 
 export type AppState = {
-  schemaVersion: 9;
+  schemaVersion: 10;
+  activeAccountId: string | null;
   profile: UserProfile | null;
   records: PracticeRecord[];
   favoritePracticeMenuIds: string[];

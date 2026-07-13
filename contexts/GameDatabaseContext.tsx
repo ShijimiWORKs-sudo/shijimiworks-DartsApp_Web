@@ -1,8 +1,25 @@
 import { SQLiteProvider, useSQLiteContext } from 'expo-sqlite';
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import type { Dispatch, ReactNode, SetStateAction } from 'react';
 import { Text, View } from 'react-native';
 
+import { useAppState } from './AppStateContext';
+import type {
+  AccountBootstrapInputs,
+  AccountBootstrapStatus,
+} from '../features/account/application';
+import {
+  resolveAccountBootstrap,
+  shouldRunAccountBootstrap,
+} from '../features/account/application';
 import type { GameRepositories } from '../features/game/application/ports';
 import { createGameServices } from '../features/game/application/services';
 import type { GameServices } from '../features/game/application/services';
@@ -17,6 +34,8 @@ type GameDatabaseContextValue = {
   isInitializing: boolean;
   isAvailable: boolean;
   initializationError: Error | null;
+  accountBootstrapStatus: AccountBootstrapStatus;
+  accountBootstrapError: Error | null;
   repositories: GameRepositories | null;
   services: GameServices | null;
 };
@@ -25,6 +44,8 @@ const GameDatabaseContext = createContext<GameDatabaseContextValue>({
   isInitializing: true,
   isAvailable: false,
   initializationError: null,
+  accountBootstrapStatus: 'loading',
+  accountBootstrapError: null,
   repositories: null,
   services: null,
 });
@@ -34,6 +55,8 @@ export function GameDatabaseProvider({ children }: { children: ReactNode }) {
     isInitializing: true,
     isAvailable: false,
     initializationError: null,
+    accountBootstrapStatus: 'loading',
+    accountBootstrapError: null,
     repositories: null,
     services: null,
   });
@@ -47,6 +70,8 @@ export function GameDatabaseProvider({ children }: { children: ReactNode }) {
       isInitializing: false,
       isAvailable: false,
       initializationError: error,
+      accountBootstrapStatus: 'temporarilyUnavailable',
+      accountBootstrapError: error,
       repositories: null,
       services: null,
     });
@@ -82,14 +107,18 @@ function GameDatabaseRepositoryBridge({
   setValue: Dispatch<SetStateAction<GameDatabaseContextValue>>;
 }) {
   const db = useSQLiteContext() as GameDatabaseConnection;
+  const { activeAccountId, isLoading: isAppStateLoading, setActiveAccountId } = useAppState();
   const repositories = useMemo(() => createGameRepositories(db), [db]);
   const services = useMemo(() => createGameServices(db), [db]);
+  const lastBootstrapInputRef = useRef<AccountBootstrapInputs | null>(null);
 
   useEffect(() => {
     setValue({
       isInitializing: false,
       isAvailable: true,
       initializationError: null,
+      accountBootstrapStatus: isAppStateLoading ? 'loading' : 'unregistered',
+      accountBootstrapError: null,
       repositories,
       services,
     });
@@ -99,11 +128,82 @@ function GameDatabaseRepositoryBridge({
         isInitializing: true,
         isAvailable: false,
         initializationError: null,
+        accountBootstrapStatus: 'loading',
+        accountBootstrapError: null,
         repositories: null,
         services: null,
       });
     };
-  }, [repositories, services, setValue]);
+  }, [isAppStateLoading, repositories, services, setValue]);
+
+  useEffect(() => {
+    const nextBootstrapInput: AccountBootstrapInputs = {
+      activeAccountId,
+      isAppStateLoading,
+      isDatabaseAvailable: true,
+    };
+
+    if (!shouldRunAccountBootstrap(lastBootstrapInputRef.current, nextBootstrapInput)) {
+      return;
+    }
+    lastBootstrapInputRef.current = nextBootstrapInput;
+
+    if (isAppStateLoading) {
+      setValue((current) => ({
+        ...current,
+        accountBootstrapStatus: 'loading',
+        accountBootstrapError: null,
+      }));
+      return;
+    }
+
+    let mounted = true;
+    const accountId = activeAccountId;
+
+    async function bootstrapActiveAccount() {
+      setValue((current) => ({
+        ...current,
+        accountBootstrapStatus: 'loading',
+        accountBootstrapError: null,
+      }));
+
+      const result = await resolveAccountBootstrap(services.account, accountId);
+
+      if (!mounted) {
+        return;
+      }
+
+      if (result.shouldPersistActiveAccountId && result.activeAccountId !== accountId) {
+        await setActiveAccountId(result.activeAccountId);
+      }
+
+      if (!mounted) {
+        return;
+      }
+
+      setValue((current) => ({
+        ...current,
+        accountBootstrapStatus: result.status,
+        accountBootstrapError:
+          result.temporaryError instanceof Error ? result.temporaryError : null,
+      }));
+    }
+
+    void bootstrapActiveAccount().catch((error) => {
+      console.warn('Account bootstrap failed', error);
+      if (mounted) {
+        setValue((current) => ({
+          ...current,
+          accountBootstrapStatus: 'temporarilyUnavailable',
+          accountBootstrapError: error instanceof Error ? error : null,
+        }));
+      }
+    });
+
+    return () => {
+      mounted = false;
+    };
+  }, [activeAccountId, isAppStateLoading, services, setActiveAccountId, setValue]);
 
   return <>{children}</>;
 }

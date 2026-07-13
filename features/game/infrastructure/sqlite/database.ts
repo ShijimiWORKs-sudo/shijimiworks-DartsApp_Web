@@ -3,7 +3,7 @@ import { GAME_DATABASE_MIGRATIONS } from './migrations';
 import type { GameDatabaseConnection, GameDatabaseExecutor } from './types';
 
 export const GAME_DATABASE_FILE_NAME = 'dartsapp_games.db';
-export const GAME_DATABASE_CURRENT_VERSION = 1;
+export const GAME_DATABASE_CURRENT_VERSION = 2;
 
 export async function applyGameDatabasePragmas(db: GameDatabaseExecutor): Promise<void> {
   await db.execAsync('PRAGMA journal_mode = WAL;');
