@@ -13,13 +13,18 @@ import { useAppState } from '../../contexts/AppStateContext';
 import { useGameDatabase } from '../../contexts/GameDatabaseContext';
 import type { AccountOverview } from '../../features/account/domain';
 import type { CountUpGameState } from '../../features/game/domain/countUp';
+import type { CricketGameState } from '../../features/game/domain/cricket';
 import type { ZeroOneGameState } from '../../features/game/domain/zeroOne';
 
 type ActiveGame =
-  { mode: 'count_up'; game: CountUpGameState } | { mode: 'zero_one'; game: ZeroOneGameState };
+  | { mode: 'count_up'; game: CountUpGameState }
+  | { mode: 'zero_one'; game: ZeroOneGameState }
+  | { mode: 'cricket'; game: CricketGameState };
 
 type RecentGame =
-  { mode: 'count_up'; game: CountUpGameState } | { mode: 'zero_one'; game: ZeroOneGameState };
+  | { mode: 'count_up'; game: CountUpGameState }
+  | { mode: 'zero_one'; game: ZeroOneGameState }
+  | { mode: 'cricket'; game: CricketGameState };
 
 export default function GameHubScreen() {
   const router = useRouter();
@@ -34,24 +39,35 @@ export default function GameHubScreen() {
       return;
     }
 
-    const [activeCountUp, activeZeroOne, recentCountUp, recentZeroOne, account] = await Promise.all(
-      [
-        services.countUp.getActiveGame(),
-        services.zeroOne.getActiveGame(),
-        services.countUp.listRecentResults(5),
-        services.zeroOne.listRecentResults(5),
-        services.account.getActiveAccount(activeAccountId),
-      ],
-    );
+    const [
+      activeCountUp,
+      activeZeroOne,
+      activeCricket,
+      recentCountUp,
+      recentZeroOne,
+      recentCricket,
+      account,
+    ] = await Promise.all([
+      services.countUp.getActiveGame(),
+      services.zeroOne.getActiveGame(),
+      services.cricket.getActiveGame(),
+      services.countUp.listRecentResults(5),
+      services.zeroOne.listRecentResults(5),
+      services.cricket.listRecentResults(5),
+      services.account.getActiveAccount(activeAccountId),
+    ]);
     setActiveGame(
-      activeZeroOne
-        ? { mode: 'zero_one', game: activeZeroOne }
-        : activeCountUp
-          ? { mode: 'count_up', game: activeCountUp }
-          : null,
+      activeCricket
+        ? { mode: 'cricket', game: activeCricket }
+        : activeZeroOne
+          ? { mode: 'zero_one', game: activeZeroOne }
+          : activeCountUp
+            ? { mode: 'count_up', game: activeCountUp }
+            : null,
     );
     setRecentResults(
       [
+        ...recentCricket.map((game) => ({ mode: 'cricket' as const, game })),
         ...recentZeroOne.map((game) => ({ mode: 'zero_one' as const, game })),
         ...recentCountUp.map((game) => ({ mode: 'count_up' as const, game })),
       ].slice(0, 5),
@@ -67,7 +83,10 @@ export default function GameHubScreen() {
 
   return (
     <ScreenShell>
-      <SectionTitle title="ゲーム" subtitle="COUNT-UPと単独01をDBへ保存しながらプレイできます。" />
+      <SectionTitle
+        title="ゲーム"
+        subtitle="COUNT-UP、単独01、STANDARD CRICKETをDBへ保存しながらプレイできます。"
+      />
 
       {activeGame ? (
         <Pressable
@@ -141,12 +160,13 @@ export default function GameHubScreen() {
             variant="secondary"
           />
           <Text style={styles.ratingNote}>{getZeroOneRatingNote(accountOverview)}</Text>
-          <View style={styles.disabledMode}>
-            <Text style={styles.disabledModeTitle}>CRICKET</Text>
-            <Text style={styles.disabledModeText}>
-              本体は未実装です。Rating候補化は今後のフェーズで扱います。
-            </Text>
-          </View>
+          <AppButton
+            label="STANDARD CRICKETを始める"
+            onPress={() => router.push('/game/cricket/settings')}
+            disabled={!isAvailable}
+            variant="secondary"
+          />
+          <Text style={styles.ratingNote}>{getCricketRatingNote(accountOverview)}</Text>
         </View>
       </Card>
 
@@ -243,25 +263,42 @@ const styles = StyleSheet.create({
 });
 
 function getPlayRoute(active: ActiveGame) {
-  return active.mode === 'zero_one'
-    ? `/game/01/${active.game.gameId}`
-    : `/game/count-up/${active.game.gameId}`;
+  if (active.mode === 'zero_one') {
+    return `/game/01/${active.game.gameId}`;
+  }
+  if (active.mode === 'cricket') {
+    return `/game/cricket/${active.game.gameId}`;
+  }
+  return `/game/count-up/${active.game.gameId}`;
 }
 
 function getResultRoute(recent: RecentGame) {
-  return recent.mode === 'zero_one'
-    ? `/game/01/${recent.game.gameId}/result`
-    : `/game/count-up/${recent.game.gameId}/result`;
+  if (recent.mode === 'zero_one') {
+    return `/game/01/${recent.game.gameId}/result`;
+  }
+  if (recent.mode === 'cricket') {
+    return `/game/cricket/${recent.game.gameId}/result`;
+  }
+  return `/game/count-up/${recent.game.gameId}/result`;
 }
 
 function getActiveTitle(active: ActiveGame) {
   const prefix = active.game.status === 'paused' ? '一時停止中の' : '進行中の';
-  return `${prefix}${active.mode === 'zero_one' ? '01 GAME' : 'COUNT-UP'}`;
+  if (active.mode === 'zero_one') {
+    return `${prefix}01 GAME`;
+  }
+  if (active.mode === 'cricket') {
+    return `${prefix}STANDARD CRICKET`;
+  }
+  return `${prefix}COUNT-UP`;
 }
 
 function getActiveSubtitle(active: ActiveGame) {
   if (active.mode === 'zero_one') {
     return `Round ${active.game.currentRoundNo} / 15、残り ${active.game.currentRemainingScore} 点`;
+  }
+  if (active.mode === 'cricket') {
+    return `Round ${active.game.currentRoundNo} / 15、現在 ${active.game.currentCricketScore} 点`;
   }
   return `Round ${active.game.currentRoundNo} / 8、現在 ${active.game.totalScore} 点`;
 }
@@ -270,12 +307,18 @@ function getResultScore(recent: RecentGame) {
   if (recent.mode === 'zero_one') {
     return `01 残り ${recent.game.result?.finalRemainingScore ?? recent.game.currentRemainingScore} 点`;
   }
+  if (recent.mode === 'cricket') {
+    return `CRICKET ${recent.game.result?.finalCricketScore ?? recent.game.currentCricketScore} 点`;
+  }
   return `COUNT-UP ${recent.game.result?.totalScore ?? recent.game.totalScore} 点`;
 }
 
 function getResultMeta(recent: RecentGame) {
   if (recent.mode === 'zero_one') {
     return `PPD ${((recent.game.result?.ppdMilli ?? 0) / 1000).toFixed(1)} / ${recent.game.outRule}`;
+  }
+  if (recent.mode === 'cricket') {
+    return `MPR ${((recent.game.result?.mprMilli ?? 0) / 1000).toFixed(2)} / ${recent.game.bullRule}`;
   }
   return `Bull ${recent.game.result?.bullCount ?? 0} / ${recent.game.bullRule}`;
 }
@@ -288,4 +331,14 @@ function getZeroOneRatingNote(accountOverview: AccountOverview | null) {
   return accountOverview.ratingProfile.establishedAt
     ? '単独01はRating更新候補として記録されます。'
     : '単独01は初回Rating確定後のゲームからRating候補になります。';
+}
+
+function getCricketRatingNote(accountOverview: AccountOverview | null) {
+  if (!accountOverview) {
+    return '単独CRICKETのRating候補化にはAccount登録が必要です。';
+  }
+
+  return accountOverview.ratingProfile.establishedAt
+    ? '単独CRICKETはRating更新候補として記録されます。'
+    : '単独CRICKETは初回Rating確定後のゲームからRating候補になります。';
 }
