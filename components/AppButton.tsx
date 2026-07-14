@@ -1,11 +1,13 @@
 import { Pressable, StyleSheet, Text } from 'react-native';
 
 import { useAppState } from '../contexts/AppStateContext';
+import type { AppButtonVariant } from './appButtonVariants';
+import { resolveAppButtonVariantColors } from './appButtonVariants';
 
 type AppButtonProps = {
   label: string;
   onPress: () => void;
-  variant?: 'primary' | 'secondary' | 'danger';
+  variant?: AppButtonVariant;
   accessibilityLabel?: string;
   disabled?: boolean;
 };
@@ -18,6 +20,7 @@ export function AppButton({
   disabled = false,
 }: AppButtonProps) {
   const { theme } = useAppState();
+  const variantColors = resolveAppButtonVariantColors(variant, theme);
 
   return (
     <Pressable
@@ -28,19 +31,16 @@ export function AppButton({
       style={({ pressed }) => [
         styles.button,
         {
-          backgroundColor: variant === 'danger' ? theme.danger : theme.primary,
+          backgroundColor: variantColors.backgroundColor,
         },
         variant === 'secondary' && {
-          borderColor: theme.border,
-          backgroundColor: theme.surface,
+          borderColor: variantColors.borderColor,
         },
         disabled && styles.disabled,
         pressed && styles.pressed,
       ]}
     >
-      <Text style={[styles.label, variant === 'secondary' && { color: theme.primaryDark }]}>
-        {label}
-      </Text>
+      <Text style={[styles.label, { color: variantColors.labelColor }]}>{label}</Text>
     </Pressable>
   );
 }

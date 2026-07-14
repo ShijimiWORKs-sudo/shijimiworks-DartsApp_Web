@@ -7,7 +7,7 @@ MVP v0.1 では実データ連携やAI連携は行わず、端末内ローカル
 ## MVPでできること
 
 - 初期設定: レーティング、利用機種、主な悩みを保存
-- ゲーム: COUNT-UPと単独01の開始、再開、手入力、undo/redo、一時停止、中断、結果表示
+- ゲーム: COUNT-UP、単独01、単独STANDARD CRICKETの開始、再開、手入力、undo/redo、一時停止、中断、結果表示
 - Account: 端末内ローカルAccountでRating所有者を識別
 - 練習メニュー: レベル、悩み、ゲーム種別に応じたメニュー表示
 - おすすめ練習: プロフィールと記録に基づく固定ロジック推薦
@@ -164,12 +164,13 @@ npm test
 npm run validate:data
 ```
 
-## Game Database / COUNT-UP / 01 / Account / Rating Foundation
+## Game Database / COUNT-UP / 01 / CRICKET / Account / Rating Foundation
 
 Phase 1では、後続のCOUNT-UP / 01 / CRICKET / MATCH実装に向けたSQLiteゲーム基盤を追加しています。
 Phase 2では、COUNT-UPの縦断実装を追加しています。
 Phase 3では、1人用の単独01縦断実装を追加しています。
 Phase 4では、ローカルAccount、OWNER紐付け、Rating Profile、単独Rating候補判定の基盤を追加します。
+Phase 5では、1人用の単独STANDARD CRICKET縦断実装を追加しています。
 
 - DBファイル名: `dartsapp_games.db`
 - 保存方式: `expo-sqlite`
@@ -213,6 +214,19 @@ COUNT-UPでできること:
 - 初回Rating確定前はRating対象外
 - 初回Rating確定後はAccount OWNERの正常完了ゲームをRating評価候補として保存
 
+単独STANDARD CRICKETでできること:
+
+- `/game` からSTANDARD CRICKETを開始
+- `/game/cricket/settings` でBull設定を選択
+- `/game/cricket/[gameId]` で20/19/18/17/16/15/BULLの手入力、undo/redo、TURN終了、一時停止、再開、中断
+- 各ターゲットは3マークでCLOSEし、CLOSE後のOver MarkをCRICKET得点へ加算
+- 全7ターゲットCLOSEかつCRICKET得点1点以上で自然終了
+- 全7ターゲットCLOSE済みでもCRICKET得点0点なら終了せず、15ラウンド以内は継続
+- 15ラウンド終了時はround limitとして完了し、0点全CLOSEはclear扱いにしない
+- 完了時に `game_player_results`、`cricket_number_states`、`integration_outbox`、`practice_record_links` を更新
+- 初回Rating確定前はRating対象外
+- 初回Rating確定後はAccount OWNERの正常完了ゲームを `standalone_cricket` のRating評価候補として保存
+
 Account / Rating基盤:
 
 - `/account/register` で端末内ローカルAccountを登録
@@ -223,7 +237,7 @@ Account / Rating基盤:
 - COUNT-UPは常にRating対象外です
 - Rating計算本体、Snapshot更新エンジン、Rating履歴画面の完全実装は後続フェーズで扱います
 
-CRICKET本体、MATCH本体、効果音・アワード動画は次フェーズ以降で実装します。
+MATCH本体、Rating計算本体、効果音・アワード動画は次フェーズ以降で実装します。
 
 ## App identity
 
@@ -260,6 +274,7 @@ CRICKET本体、MATCH本体、効果音・アワード動画は次フェーズ�
 - `docs/implementation/PHASE_2_REPORT.md`
 - `docs/implementation/PHASE_3_REPORT.md`
 - `docs/implementation/PHASE_4_REPORT.md`
+- `docs/implementation/PHASE_5_REPORT.md`
 - `docs/implementation/OPEN_QUESTIONS.md`
 - `docs/EAS_BUILD_GUIDE.md`
 - `docs/TESTFLIGHT_PREP.md`

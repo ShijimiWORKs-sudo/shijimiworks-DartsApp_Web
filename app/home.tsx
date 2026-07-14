@@ -18,6 +18,7 @@ import { useAppState } from '../contexts/AppStateContext';
 import { useGameDatabase } from '../contexts/GameDatabaseContext';
 import type { AccountOverview } from '../features/account/domain';
 import type { CountUpGameState } from '../features/game/domain/countUp';
+import type { CricketGameState } from '../features/game/domain/cricket';
 import type { ZeroOneGameState } from '../features/game/domain/zeroOne';
 import { calculateAnalysisSummary } from '../utils/analyzePracticeRecords';
 import { recommendPracticeMenus } from '../utils/recommendPracticeMenus';
@@ -37,7 +38,9 @@ const menuLinks = [
 ] as const;
 
 type ActiveGame =
-  { mode: 'count_up'; game: CountUpGameState } | { mode: 'zero_one'; game: ZeroOneGameState };
+  | { mode: 'count_up'; game: CountUpGameState }
+  | { mode: 'zero_one'; game: ZeroOneGameState }
+  | { mode: 'cricket'; game: CricketGameState };
 
 export default function HomeScreen() {
   const router = useRouter();
@@ -72,18 +75,21 @@ export default function HomeScreen() {
           return;
         }
 
-        const [countUp, zeroOne, account] = await Promise.all([
+        const [countUp, zeroOne, cricket, account] = await Promise.all([
           services.countUp.getActiveGame(),
           services.zeroOne.getActiveGame(),
+          services.cricket.getActiveGame(),
           services.account.getActiveAccount(activeAccountId),
         ]);
         if (mounted) {
           setActiveGame(
-            zeroOne
-              ? { mode: 'zero_one', game: zeroOne }
-              : countUp
-                ? { mode: 'count_up', game: countUp }
-                : null,
+            cricket
+              ? { mode: 'cricket', game: cricket }
+              : zeroOne
+                ? { mode: 'zero_one', game: zeroOne }
+                : countUp
+                  ? { mode: 'count_up', game: countUp }
+                  : null,
           );
           setAccountOverview(account);
         }
@@ -124,7 +130,7 @@ export default function HomeScreen() {
       <Card muted>
         <SectionTitle
           title="ゲームを始める"
-          subtitle="COUNT-UPと単独01をDBへ保存しながらプレイできます。"
+          subtitle="COUNT-UP、単独01、STANDARD CRICKETをDBへ保存しながらプレイできます。"
           tone="card"
         />
         <View style={styles.gameAction}>
@@ -329,14 +335,21 @@ function trimSummary(text: string, maxLength: number) {
 }
 
 function getActiveRoute(active: ActiveGame) {
-  return active.mode === 'zero_one'
-    ? `/game/01/${active.game.gameId}`
-    : `/game/count-up/${active.game.gameId}`;
+  if (active.mode === 'zero_one') {
+    return `/game/01/${active.game.gameId}`;
+  }
+  if (active.mode === 'cricket') {
+    return `/game/cricket/${active.game.gameId}`;
+  }
+  return `/game/count-up/${active.game.gameId}`;
 }
 
 function getActiveTitle(active: ActiveGame) {
   if (active.mode === 'zero_one') {
     return active.game.status === 'paused' ? '01 GAMEを再開' : '進行中の01 GAME';
+  }
+  if (active.mode === 'cricket') {
+    return active.game.status === 'paused' ? 'STANDARD CRICKETを再開' : '進行中のSTANDARD CRICKET';
   }
   return active.game.status === 'paused' ? 'COUNT-UPを再開' : '進行中のCOUNT-UP';
 }
@@ -344,6 +357,9 @@ function getActiveTitle(active: ActiveGame) {
 function getActiveSubtitle(active: ActiveGame) {
   if (active.mode === 'zero_one') {
     return `Round ${active.game.currentRoundNo} / 15、残り ${active.game.currentRemainingScore} 点`;
+  }
+  if (active.mode === 'cricket') {
+    return `Round ${active.game.currentRoundNo} / 15、現在 ${active.game.currentCricketScore} 点`;
   }
   return `Round ${active.game.currentRoundNo} / 8、現在 ${active.game.totalScore} 点`;
 }
