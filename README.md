@@ -1,8 +1,8 @@
-# DartsSupportApp
+# DartsApp
 
-DartsSupportApp は、iPhone でソフトダーツの練習メニュー、記録、分析、フォーム相談を確認するための Expo + React Native MVP です。
+DartsApp は、Windows PC Webでソフトダーツのゲーム進行、手入力スコア、ローカルSQLite保存を確認するための Expo + React Native アプリです。
 
-MVP v0.1 では実データ連携やAI連携は行わず、端末内ローカル保存と固定ロジックで、主要な画面遷移と練習支援の体験を確認できる状態にしています。
+MVP v0.1 由来の練習支援画面も残っていますが、DartsApp側の正式対象はPC WebのCOUNT-UP、01、STANDARD CRICKET、MATCH、Account、Rating評価候補のローカル動作です。実データ連携やAI連携は行わず、端末内ローカル保存と固定ロジックで確認します。
 
 ## MVPでできること
 
@@ -37,6 +37,7 @@ MVP v0.1 では実データ連携やAI連携は行わず、端末内ローカル
 
 - Node.js 22 以上
 - npm
+- Windows 11 + Chrome / Edge
 - iPhone 実機、または iOS Simulator
 - iPhone 実機で確認する場合は Expo Go
 
@@ -60,6 +61,22 @@ npx expo start
 npm run start:lan
 npm run start:tunnel
 ```
+
+PC Webで確認する場合:
+
+```powershell
+npm.cmd run web -- --port 8104 --clear
+```
+
+このコマンドはExpo Web dev serverを内部ポートで起動し、指定ポートにはSQLite Webに必要なCOEP / COOPヘッダー付きのローカルproxyを公開します。
+
+Web export:
+
+```powershell
+npx.cmd expo export --platform web
+```
+
+PC Webの詳細手順は `docs/PC_WEB_SETUP.md` と `docs/PC_WEB_QA_CHECKLIST.md` を参照してください。
 
 ## iPhone Expo Goで確認する
 
@@ -270,10 +287,11 @@ Rating計算本体、効果音・アワード動画は次フェーズ以降で�
 
 ## App identity
 
-- App name: `DartsSupportApp`
-- Expo slug: `darts-support-app`
+- App name: `DartsApp`
+- Expo slug: `darts-app`
 - Version: `0.1.0`
 - iOS bundle identifier: `com.shijimiworks.dartssupportapp`
+- URL scheme: `dartsapp`
 - Logo path: `assets/images/logo.png`
 - Icon path: `assets/images/icon.png`
 - Splash path: `assets/images/splash.png`
@@ -307,6 +325,9 @@ Rating計算本体、効果音・アワード動画は次フェーズ以降で�
 - `docs/implementation/DARTSAPP_COMMON_CONTRACT_REPORT.md`
 - `docs/implementation/PHASE_5_REPORT.md`
 - `docs/implementation/PHASE_6_REPORT.md`
+- `docs/implementation/PHASE_7_REPORT.md`
+- `docs/PC_WEB_SETUP.md`
+- `docs/PC_WEB_QA_CHECKLIST.md`
 - `docs/implementation/OPEN_QUESTIONS.md`
 - `docs/EAS_BUILD_GUIDE.md`
 - `docs/TESTFLIGHT_PREP.md`

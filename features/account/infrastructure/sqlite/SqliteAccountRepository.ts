@@ -3,6 +3,7 @@ import type {
   GameDatabaseConnection,
   GameDatabaseExecutor,
 } from '../../../game/infrastructure/sqlite/types';
+import { runGameDatabaseTransaction } from '../../../game/infrastructure/sqlite/transaction';
 import type { AccountRepository } from '../../application';
 import {
   AccountNotFoundError,
@@ -115,7 +116,7 @@ export class SqliteAccountRepository implements AccountRepository {
   async registerLocalAccount(input: NormalizedAccountRegistrationInput): Promise<AccountOverview> {
     let accountId: string | null = null;
 
-    await this.db.withExclusiveTransactionAsync(async (transaction) => {
+    await runGameDatabaseTransaction(this.db, async (transaction) => {
       await assertUserNameAvailable(transaction, input.userName);
       const owner = await getOrCreateOwner(transaction, input.displayName);
       const now = new Date().toISOString();
@@ -201,7 +202,7 @@ export class SqliteAccountRepository implements AccountRepository {
     accountId: string,
     input: NormalizedAccountProfileUpdateInput,
   ): Promise<AccountOverview> {
-    await this.db.withExclusiveTransactionAsync(async (transaction) => {
+    await runGameDatabaseTransaction(this.db, async (transaction) => {
       const owner = await loadOwnerByAccountId(transaction, accountId);
       if (!owner) {
         throw new AccountNotFoundError(accountId);
@@ -239,7 +240,7 @@ export class SqliteAccountRepository implements AccountRepository {
   async ensureRatingProfile(accountId: string): Promise<RatingProfile> {
     let profile: RatingProfile | null = null;
 
-    await this.db.withExclusiveTransactionAsync(async (transaction) => {
+    await runGameDatabaseTransaction(this.db, async (transaction) => {
       const owner = await loadOwnerByAccountId(transaction, accountId);
       if (!owner) {
         throw new AccountNotFoundError(accountId);
@@ -261,7 +262,7 @@ export class SqliteAccountRepository implements AccountRepository {
     ratingTenths: number;
     establishedAt: string;
   }): Promise<RatingProfile> {
-    await this.db.withExclusiveTransactionAsync(async (transaction) => {
+    await runGameDatabaseTransaction(this.db, async (transaction) => {
       const owner = await loadOwnerByAccountId(transaction, input.accountId);
       if (!owner) {
         throw new AccountNotFoundError(input.accountId);

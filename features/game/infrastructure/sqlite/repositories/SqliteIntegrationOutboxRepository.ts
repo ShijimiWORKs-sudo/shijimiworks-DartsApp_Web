@@ -2,6 +2,7 @@ import type { IntegrationOutboxRepository } from '../../../application/ports';
 import { createGameId } from '../../../domain/ids';
 import type { EnqueueOutboxInput, IntegrationOutboxEvent } from '../../../domain/types';
 import type { GameDatabaseConnection } from '../types';
+import { runGameDatabaseTransaction } from '../transaction';
 import { mapOutboxRow, type OutboxRow } from '../rowMappers/outboxMapper';
 
 const OUTBOX_COLUMNS = `
@@ -16,7 +17,7 @@ export class SqliteIntegrationOutboxRepository implements IntegrationOutboxRepos
   async enqueue(input: EnqueueOutboxInput): Promise<IntegrationOutboxEvent> {
     let event: IntegrationOutboxEvent | null = null;
 
-    await this.db.withExclusiveTransactionAsync(async (transaction) => {
+    await runGameDatabaseTransaction(this.db, async (transaction) => {
       const existing = await transaction.getFirstAsync<OutboxRow>(
         `SELECT ${OUTBOX_COLUMNS}
          FROM integration_outbox
@@ -92,7 +93,7 @@ export class SqliteIntegrationOutboxRepository implements IntegrationOutboxRepos
   }
 
   async markProcessed(id: string, processedAt = new Date().toISOString()): Promise<void> {
-    await this.db.withExclusiveTransactionAsync(async (transaction) => {
+    await runGameDatabaseTransaction(this.db, async (transaction) => {
       await transaction.runAsync(
         `UPDATE integration_outbox
          SET status = 'completed', processed_at = ?, updated_at = ?
@@ -109,7 +110,7 @@ export class SqliteIntegrationOutboxRepository implements IntegrationOutboxRepos
     error: { code: string; message: string },
     failedAt = new Date().toISOString(),
   ): Promise<void> {
-    await this.db.withExclusiveTransactionAsync(async (transaction) => {
+    await runGameDatabaseTransaction(this.db, async (transaction) => {
       await transaction.runAsync(
         `UPDATE integration_outbox
          SET status = 'failed',

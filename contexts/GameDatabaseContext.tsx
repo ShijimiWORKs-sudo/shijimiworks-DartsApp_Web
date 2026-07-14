@@ -11,6 +11,7 @@ import {
 import type { Dispatch, ReactNode, SetStateAction } from 'react';
 import { Text, View } from 'react-native';
 
+import { WebStartupErrorBoundary } from '../components/WebStartupErrorBoundary';
 import { useAppState } from './AppStateContext';
 import type {
   AccountBootstrapInputs,
@@ -29,6 +30,7 @@ import {
 } from '../features/game/infrastructure/sqlite/database';
 import { createGameRepositories } from '../features/game/infrastructure/sqlite/repositories';
 import type { GameDatabaseConnection } from '../features/game/infrastructure/sqlite/types';
+import { createDeferredErrorHandler } from '../features/web/deferredError';
 
 type GameDatabaseContextValue = {
   isInitializing: boolean;
@@ -65,17 +67,21 @@ export function GameDatabaseProvider({ children }: { children: ReactNode }) {
     await initializeGameDatabase(db);
   }, []);
 
-  const handleError = useCallback((error: Error) => {
-    setValue({
-      isInitializing: false,
-      isAvailable: false,
-      initializationError: error,
-      accountBootstrapStatus: 'temporarilyUnavailable',
-      accountBootstrapError: error,
-      repositories: null,
-      services: null,
-    });
-  }, []);
+  const handleError = useMemo(
+    () =>
+      createDeferredErrorHandler((error: Error) => {
+        setValue({
+          isInitializing: false,
+          isAvailable: false,
+          initializationError: error,
+          accountBootstrapStatus: 'temporarilyUnavailable',
+          accountBootstrapError: error,
+          repositories: null,
+          services: null,
+        });
+      }),
+    [],
+  );
 
   if (value.initializationError) {
     return (
@@ -209,6 +215,11 @@ function GameDatabaseRepositoryBridge({
 }
 
 function GameDatabaseErrorBanner({ error }: { error: Error }) {
+  if (typeof window !== 'undefined') {
+    console.error('[DartsApp] Web database initialization failed', error);
+    return <WebStartupErrorBoundary error={error} stage="web_database_init" />;
+  }
+
   return (
     <View
       style={{

@@ -17,6 +17,7 @@ import type {
   GameDatabaseConnection,
   GameDatabaseExecutor,
 } from '../../infrastructure/sqlite/types';
+import { runGameDatabaseTransaction } from '../../infrastructure/sqlite/transaction';
 
 export class ActiveGameExistsError extends Error {
   constructor(readonly gameId: string) {
@@ -71,7 +72,7 @@ export class CountUpGameService {
   async startGame(input: { bullRule: BullRule; ownerName?: string } = { bullRule: 'fat_bull' }) {
     let gameId: string | null = null;
 
-    await this.db.withExclusiveTransactionAsync(async (transaction) => {
+    await runGameDatabaseTransaction(this.db, async (transaction) => {
       const active = await transaction.getFirstAsync<{ id: string }>(
         `SELECT id
          FROM game_sessions
@@ -229,7 +230,7 @@ export class CountUpGameService {
   }
 
   async recordDart(gameId: string, input: CountUpDartInput): Promise<CountUpGameState> {
-    await this.db.withExclusiveTransactionAsync(async (transaction) => {
+    await runGameDatabaseTransaction(this.db, async (transaction) => {
       const existing = input.clientActionId
         ? await transaction.getFirstAsync<{ id: string }>(
             `SELECT id FROM darts WHERE client_action_id = ? LIMIT 1`,
@@ -315,7 +316,7 @@ export class CountUpGameService {
   }
 
   async undoDart(gameId: string): Promise<CountUpGameState> {
-    await this.db.withExclusiveTransactionAsync(async (transaction) => {
+    await runGameDatabaseTransaction(this.db, async (transaction) => {
       const context = await loadMutableTurnContext(transaction, gameId, 'in_progress');
       const dart = await transaction.getFirstAsync<{ id: string }>(
         `SELECT id
@@ -345,7 +346,7 @@ export class CountUpGameService {
   }
 
   async redoDart(gameId: string, dartId: string): Promise<CountUpGameState> {
-    await this.db.withExclusiveTransactionAsync(async (transaction) => {
+    await runGameDatabaseTransaction(this.db, async (transaction) => {
       const context = await loadMutableTurnContext(transaction, gameId, 'in_progress');
       const activeCount = await countActiveDarts(transaction, context.turnId);
 
@@ -383,7 +384,7 @@ export class CountUpGameService {
   }
 
   async confirmTurn(gameId: string, input: { machineType?: string | null } = {}) {
-    await this.db.withExclusiveTransactionAsync(async (transaction) => {
+    await runGameDatabaseTransaction(this.db, async (transaction) => {
       const context = await loadMutableTurnContext(transaction, gameId, 'in_progress');
       const darts = await loadTurnDarts(transaction, context.turnId);
       const activeDarts = darts.filter((dart) => dart.status === 'active');
@@ -516,7 +517,7 @@ export class CountUpGameService {
   }
 
   async abortGame(gameId: string): Promise<void> {
-    await this.db.withExclusiveTransactionAsync(async (transaction) => {
+    await runGameDatabaseTransaction(this.db, async (transaction) => {
       const now = new Date().toISOString();
       await transaction.runAsync(
         `UPDATE game_sessions
@@ -534,7 +535,7 @@ export class CountUpGameService {
   }
 
   private async updateGameStatus(gameId: string, status: 'in_progress' | 'paused') {
-    await this.db.withExclusiveTransactionAsync(async (transaction) => {
+    await runGameDatabaseTransaction(this.db, async (transaction) => {
       const now = new Date().toISOString();
       await transaction.runAsync(
         `UPDATE game_sessions

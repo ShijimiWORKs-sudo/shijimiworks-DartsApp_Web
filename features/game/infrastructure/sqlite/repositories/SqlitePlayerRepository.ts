@@ -2,6 +2,7 @@ import type { PlayerRepository } from '../../../application/ports';
 import type { CreateGuestPlayerInput, CreateOwnerPlayerInput, Player } from '../../../domain/types';
 import { createGameId } from '../../../domain/ids';
 import type { GameDatabaseConnection, GameDatabaseExecutor } from '../types';
+import { runGameDatabaseTransaction } from '../transaction';
 import { mapPlayerRow, type PlayerRow } from '../rowMappers/playerMapper';
 
 const PLAYER_COLUMNS = `
@@ -17,7 +18,7 @@ export class SqlitePlayerRepository implements PlayerRepository {
   ): Promise<Player> {
     let player: Player | null = null;
 
-    await this.db.withExclusiveTransactionAsync(async (transaction) => {
+    await runGameDatabaseTransaction(this.db, async (transaction) => {
       const existing = await transaction.getFirstAsync<PlayerRow>(
         `SELECT ${PLAYER_COLUMNS}
          FROM players
@@ -60,7 +61,7 @@ export class SqlitePlayerRepository implements PlayerRepository {
   async createGuest(input: CreateGuestPlayerInput): Promise<Player> {
     let player: Player | null = null;
 
-    await this.db.withExclusiveTransactionAsync(async (transaction) => {
+    await runGameDatabaseTransaction(this.db, async (transaction) => {
       player = await insertPlayer(transaction, {
         id: createGameId(),
         playerType: 'guest',
@@ -90,7 +91,7 @@ export class SqlitePlayerRepository implements PlayerRepository {
 
   async archive(playerId: string): Promise<void> {
     const now = new Date().toISOString();
-    await this.db.withExclusiveTransactionAsync(async (transaction) => {
+    await runGameDatabaseTransaction(this.db, async (transaction) => {
       await transaction.runAsync(
         `UPDATE players
          SET is_archived = 1, updated_at = ?, anonymized_at = COALESCE(anonymized_at, ?)

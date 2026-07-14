@@ -1,5 +1,5 @@
 {
-  "name": "darts-support-app",
+  "name": "darts-app",
   "version": "0.1.0",
   "private": true,
   "main": "expo-router/entry",
@@ -9,7 +9,7 @@
     "start:lan": "expo start --lan --port 8099 --clear",
     "ios": "expo start --ios",
     "android": "expo start --android",
-    "web": "expo start --web",
+    "web": "node scripts/start-web-with-headers.cjs",
     "eas:build:preview": "eas build --platform ios --profile preview",
     "eas:build:production": "eas build --platform ios --profile production",
     "eas:submit:ios": "eas submit --platform ios",

@@ -20,6 +20,7 @@ import type {
   GameDatabaseConnection,
   GameDatabaseExecutor,
 } from '../../infrastructure/sqlite/types';
+import { runGameDatabaseTransaction } from '../../infrastructure/sqlite/transaction';
 import type { MatchGameServicePort } from './MatchGameServicePort';
 
 export class MatchActiveExistsError extends Error {
@@ -84,7 +85,7 @@ export class MatchGameService implements MatchGameServicePort {
   async startMatch(input: MatchStartInput): Promise<MatchState> {
     validateStartInput(input);
     let matchId: string | null = null;
-    await this.db.withExclusiveTransactionAsync(async (transaction) => {
+    await runGameDatabaseTransaction(this.db, async (transaction) => {
       const active = await transaction.getFirstAsync<{ id: string }>(
         `SELECT id FROM matches
          WHERE status IN ('in_progress', 'paused') AND deleted_at IS NULL
@@ -203,7 +204,7 @@ export class MatchGameService implements MatchGameServicePort {
   }
 
   async recordDart(matchId: string, input: MatchDartInput): Promise<MatchState> {
-    await this.db.withExclusiveTransactionAsync(async (transaction) => {
+    await runGameDatabaseTransaction(this.db, async (transaction) => {
       const context = await loadMutableTurnContext(transaction, matchId);
       const existing = input.clientActionId
         ? await transaction.getFirstAsync<{ id: string }>(
@@ -262,7 +263,7 @@ export class MatchGameService implements MatchGameServicePort {
   }
 
   async undoDart(matchId: string): Promise<MatchState> {
-    await this.db.withExclusiveTransactionAsync(async (transaction) => {
+    await runGameDatabaseTransaction(this.db, async (transaction) => {
       const context = await loadMutableTurnContext(transaction, matchId);
       const dart = await transaction.getFirstAsync<{ id: string }>(
         `SELECT id FROM darts
@@ -285,7 +286,7 @@ export class MatchGameService implements MatchGameServicePort {
   }
 
   async redoDart(matchId: string, dartId: string): Promise<MatchState> {
-    await this.db.withExclusiveTransactionAsync(async (transaction) => {
+    await runGameDatabaseTransaction(this.db, async (transaction) => {
       const context = await loadMutableTurnContext(transaction, matchId);
       const dart = await transaction.getFirstAsync<{ id: string }>(
         `SELECT id FROM darts
@@ -308,7 +309,7 @@ export class MatchGameService implements MatchGameServicePort {
   }
 
   async confirmTurn(matchId: string): Promise<MatchState> {
-    await this.db.withExclusiveTransactionAsync(async (transaction) => {
+    await runGameDatabaseTransaction(this.db, async (transaction) => {
       const context = await loadMutableTurnContext(transaction, matchId);
       if (context.mode === 'zero_one') {
         await confirmZeroOneTurn(transaction, context, false);
@@ -324,7 +325,7 @@ export class MatchGameService implements MatchGameServicePort {
     input: MatchManualWinnerInput,
   ): Promise<MatchState> {
     validateManualReason(input.reason);
-    await this.db.withExclusiveTransactionAsync(async (transaction) => {
+    await runGameDatabaseTransaction(this.db, async (transaction) => {
       const context = await loadCurrentGameContext(transaction, matchId);
       await completeGame(
         transaction,
@@ -338,7 +339,7 @@ export class MatchGameService implements MatchGameServicePort {
   }
 
   async startNextGame(matchId: string): Promise<MatchState> {
-    await this.db.withExclusiveTransactionAsync(async (transaction) => {
+    await runGameDatabaseTransaction(this.db, async (transaction) => {
       const match = await loadMatchRow(transaction, matchId);
       const games = await loadGameRows(transaction, matchId);
       const players = await loadMatchPlayers(transaction, matchId);
@@ -369,7 +370,7 @@ export class MatchGameService implements MatchGameServicePort {
   }
 
   async chooseFinalGame(matchId: string, input: MatchChoiceInput): Promise<MatchState> {
-    await this.db.withExclusiveTransactionAsync(async (transaction) => {
+    await runGameDatabaseTransaction(this.db, async (transaction) => {
       const match = await loadMatchRow(transaction, matchId);
       const games = await loadGameRows(transaction, matchId);
       const players = await loadMatchPlayers(transaction, matchId);
@@ -410,7 +411,7 @@ export class MatchGameService implements MatchGameServicePort {
 
   async pauseMatch(matchId: string): Promise<MatchState> {
     const now = new Date().toISOString();
-    await this.db.withExclusiveTransactionAsync(async (transaction) => {
+    await runGameDatabaseTransaction(this.db, async (transaction) => {
       await transaction.runAsync(
         `UPDATE matches SET status = 'paused', paused_at = ?, updated_at = ? WHERE id = ?`,
         now,
@@ -429,7 +430,7 @@ export class MatchGameService implements MatchGameServicePort {
 
   async resumeMatch(matchId: string): Promise<MatchState> {
     const now = new Date().toISOString();
-    await this.db.withExclusiveTransactionAsync(async (transaction) => {
+    await runGameDatabaseTransaction(this.db, async (transaction) => {
       await transaction.runAsync(
         `UPDATE matches SET status = 'in_progress', paused_at = NULL, updated_at = ? WHERE id = ?`,
         now,
@@ -446,7 +447,7 @@ export class MatchGameService implements MatchGameServicePort {
 
   async abortMatch(matchId: string): Promise<void> {
     const now = new Date().toISOString();
-    await this.db.withExclusiveTransactionAsync(async (transaction) => {
+    await runGameDatabaseTransaction(this.db, async (transaction) => {
       await transaction.runAsync(
         `UPDATE matches
          SET status = 'aborted', completion_reason = 'aborted', completed_at = ?, updated_at = ?

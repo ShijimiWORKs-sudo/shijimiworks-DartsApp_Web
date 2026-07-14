@@ -21,6 +21,7 @@ import type {
   GameDatabaseConnection,
   GameDatabaseExecutor,
 } from '../../infrastructure/sqlite/types';
+import { runGameDatabaseTransaction } from '../../infrastructure/sqlite/transaction';
 import { StandaloneRatingCandidateService } from './StandaloneRatingCandidateService';
 import type { CricketGameServicePort, CricketLastSettings } from './CricketGameServicePort';
 
@@ -77,7 +78,7 @@ export class CricketGameService implements CricketGameServicePort {
   async startGame(input: CricketStartInput): Promise<CricketGameState> {
     let gameId: string | null = null;
 
-    await this.db.withExclusiveTransactionAsync(async (transaction) => {
+    await runGameDatabaseTransaction(this.db, async (transaction) => {
       const active = await transaction.getFirstAsync<{ id: string }>(
         `SELECT id
          FROM game_sessions
@@ -256,7 +257,7 @@ export class CricketGameService implements CricketGameServicePort {
   }
 
   async recordDart(gameId: string, input: CricketDartInput): Promise<CricketGameState> {
-    await this.db.withExclusiveTransactionAsync(async (transaction) => {
+    await runGameDatabaseTransaction(this.db, async (transaction) => {
       const context = await loadMutableTurnContext(transaction, gameId);
       const existing = input.clientActionId
         ? await transaction.getFirstAsync<{ id: string }>(
@@ -344,7 +345,7 @@ export class CricketGameService implements CricketGameServicePort {
   }
 
   async undoDart(gameId: string): Promise<CricketGameState> {
-    await this.db.withExclusiveTransactionAsync(async (transaction) => {
+    await runGameDatabaseTransaction(this.db, async (transaction) => {
       const context = await loadMutableTurnContext(transaction, gameId);
       const dart = await transaction.getFirstAsync<{ id: string }>(
         `SELECT id
@@ -374,7 +375,7 @@ export class CricketGameService implements CricketGameServicePort {
   }
 
   async redoDart(gameId: string, dartId: string): Promise<CricketGameState> {
-    await this.db.withExclusiveTransactionAsync(async (transaction) => {
+    await runGameDatabaseTransaction(this.db, async (transaction) => {
       const context = await loadMutableTurnContext(transaction, gameId);
       const activeCount = await countActiveDarts(transaction, context.turnId);
       const dart = await transaction.getFirstAsync<{ id: string; dart_no: number }>(
@@ -414,7 +415,7 @@ export class CricketGameService implements CricketGameServicePort {
     gameId: string,
     input: { machineType?: string | null } = {},
   ): Promise<CricketGameState> {
-    await this.db.withExclusiveTransactionAsync(async (transaction) => {
+    await runGameDatabaseTransaction(this.db, async (transaction) => {
       const context = await loadMutableTurnContext(transaction, gameId);
       const activeCount = await countActiveDarts(transaction, context.turnId);
       if (activeCount === 0) {
@@ -460,7 +461,7 @@ export class CricketGameService implements CricketGameServicePort {
   }
 
   async abortGame(gameId: string): Promise<void> {
-    await this.db.withExclusiveTransactionAsync(async (transaction) => {
+    await runGameDatabaseTransaction(this.db, async (transaction) => {
       const now = new Date().toISOString();
       await transaction.runAsync(
         `UPDATE game_sessions
@@ -479,7 +480,7 @@ export class CricketGameService implements CricketGameServicePort {
   }
 
   private async updateGameStatus(gameId: string, status: 'in_progress' | 'paused') {
-    await this.db.withExclusiveTransactionAsync(async (transaction) => {
+    await runGameDatabaseTransaction(this.db, async (transaction) => {
       const now = new Date().toISOString();
       await transaction.runAsync(
         `UPDATE game_sessions
