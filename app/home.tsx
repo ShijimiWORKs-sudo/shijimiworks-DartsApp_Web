@@ -11,6 +11,7 @@ import { RoundIconButton } from '../components/RoundIconButton';
 import { ScreenShell } from '../components/ScreenShell';
 import { SectionTitle } from '../components/SectionTitle';
 import { StatCard } from '../components/StatCard';
+import { useDesktopWebLayout } from '../components/web/useDesktopWebLayout';
 import { conditionLabels, gameLabels, machineLabels } from '../constants/labels';
 import { levelLabels } from '../constants/levels';
 import { colors } from '../constants/theme';
@@ -45,6 +46,7 @@ type ActiveGame =
 export default function HomeScreen() {
   const router = useRouter();
   const { accountBootstrapStatus, services } = useGameDatabase();
+  const isDesktopWeb = useDesktopWebLayout();
   const [activeGame, setActiveGame] = useState<ActiveGame | null>(null);
   const [accountOverview, setAccountOverview] = useState<AccountOverview | null>(null);
   const {
@@ -104,7 +106,7 @@ export default function HomeScreen() {
 
   return (
     <ScreenShell>
-      <View style={styles.header}>
+      <View style={[styles.header, isDesktopWeb && styles.desktopHeader]}>
         <Image source={logo} resizeMode="contain" style={styles.logo} />
         <View style={styles.headerText}>
           <Text style={[styles.appName, { color: theme.onBackground }]}>DartsSupportApp</Text>
@@ -194,7 +196,7 @@ export default function HomeScreen() {
         </Pressable>
       ) : null}
 
-      <View style={styles.statsRow}>
+      <View style={[styles.statsRow, isDesktopWeb && styles.desktopStatsRow]}>
         <StatCard
           label="現在レーティング"
           value={profile ? `RT ${profile.rating}` : '-'}
@@ -309,7 +311,7 @@ export default function HomeScreen() {
       )}
 
       <SectionTitle title="主要メニュー" />
-      <View style={styles.menuGrid}>
+      <View style={[styles.menuGrid, isDesktopWeb && styles.desktopMenuGrid]}>
         {menuLinks.map((item) => (
           <Pressable
             key={item.href}
@@ -317,6 +319,7 @@ export default function HomeScreen() {
             onPress={() => router.push(item.href)}
             style={({ pressed }) => [
               styles.menuCard,
+              isDesktopWeb && styles.desktopMenuCard,
               { borderColor: theme.border, backgroundColor: theme.surface },
               pressed && styles.pressed,
             ]}
@@ -392,6 +395,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 14,
   },
+  desktopHeader: {
+    minHeight: 84,
+  },
   logo: {
     width: 64,
     height: 64,
@@ -413,6 +419,9 @@ const styles = StyleSheet.create({
   statsRow: {
     flexDirection: 'row',
     gap: 12,
+  },
+  desktopStatsRow: {
+    maxWidth: 720,
   },
   setupAction: {
     marginTop: 14,
@@ -514,6 +523,12 @@ const styles = StyleSheet.create({
   menuGrid: {
     gap: 10,
   },
+  desktopMenuGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'stretch',
+    gap: 12,
+  },
   menuCard: {
     minHeight: 72,
     justifyContent: 'center',
@@ -522,6 +537,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
     backgroundColor: colors.surface,
+  },
+  desktopMenuCard: {
+    width: '31%',
+    minWidth: 260,
   },
   menuTitle: {
     color: colors.text,

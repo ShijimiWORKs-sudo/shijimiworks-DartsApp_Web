@@ -8,6 +8,7 @@ import { AccountLocalNotice } from '../../components/account/AccountLocalNotice'
 import { RatingStatusCard } from '../../components/account/RatingStatusCard';
 import { ScreenShell } from '../../components/ScreenShell';
 import { SectionTitle } from '../../components/SectionTitle';
+import { useDesktopWebLayout } from '../../components/web/useDesktopWebLayout';
 import { colors } from '../../constants/theme';
 import { useAppState } from '../../contexts/AppStateContext';
 import { useGameDatabase } from '../../contexts/GameDatabaseContext';
@@ -33,6 +34,7 @@ export default function GameHubScreen() {
   const router = useRouter();
   const { activeAccountId } = useAppState();
   const { accountBootstrapStatus, services, isAvailable } = useGameDatabase();
+  const isDesktopWeb = useDesktopWebLayout();
   const [activeGame, setActiveGame] = useState<ActiveGame | null>(null);
   const [recentResults, setRecentResults] = useState<RecentGame[]>([]);
   const [accountOverview, setAccountOverview] = useState<AccountOverview | null>(null);
@@ -156,35 +158,45 @@ export default function GameHubScreen() {
 
       <Card>
         <SectionTitle title="ゲームモード" subtitle="単独練習を記録できます。" tone="card" />
-        <View style={styles.modeList}>
-          <AppButton
-            label="COUNT-UPを始める"
-            onPress={() => router.push('/game/count-up/settings')}
-            disabled={!isAvailable}
-            variant="countUp"
-          />
-          <Text style={styles.ratingNote}>COUNT-UPはRating対象外です。</Text>
-          <AppButton
-            label="01 GAMEを始める"
-            onPress={() => router.push('/game/01/settings')}
-            disabled={!isAvailable}
-            variant="zeroOne"
-          />
-          <Text style={styles.ratingNote}>{getZeroOneRatingNote(accountOverview)}</Text>
-          <AppButton
-            label="STANDARD CRICKETを始める"
-            onPress={() => router.push('/game/cricket/settings')}
-            disabled={!isAvailable}
-            variant="cricket"
-          />
-          <Text style={styles.ratingNote}>{getCricketRatingNote(accountOverview)}</Text>
-          <AppButton
-            label="MATCHを始める"
-            onPress={() => router.push('/game/match/settings')}
-            disabled={!isAvailable}
-            variant="match"
-          />
-          <Text style={styles.ratingNote}>MATCHは初回Rating確定前でも候補として保存されます。</Text>
+        <View style={[styles.modeList, isDesktopWeb && styles.desktopModeList]}>
+          <View style={[styles.modeItem, isDesktopWeb && styles.desktopModeItem]}>
+            <AppButton
+              label="COUNT-UPを始める"
+              onPress={() => router.push('/game/count-up/settings')}
+              disabled={!isAvailable}
+              variant="countUp"
+            />
+            <Text style={styles.ratingNote}>COUNT-UPはRating対象外です。</Text>
+          </View>
+          <View style={[styles.modeItem, isDesktopWeb && styles.desktopModeItem]}>
+            <AppButton
+              label="01 GAMEを始める"
+              onPress={() => router.push('/game/01/settings')}
+              disabled={!isAvailable}
+              variant="zeroOne"
+            />
+            <Text style={styles.ratingNote}>{getZeroOneRatingNote(accountOverview)}</Text>
+          </View>
+          <View style={[styles.modeItem, isDesktopWeb && styles.desktopModeItem]}>
+            <AppButton
+              label="STANDARD CRICKETを始める"
+              onPress={() => router.push('/game/cricket/settings')}
+              disabled={!isAvailable}
+              variant="cricket"
+            />
+            <Text style={styles.ratingNote}>{getCricketRatingNote(accountOverview)}</Text>
+          </View>
+          <View style={[styles.modeItem, isDesktopWeb && styles.desktopModeItem]}>
+            <AppButton
+              label="MATCHを始める"
+              onPress={() => router.push('/game/match/settings')}
+              disabled={!isAvailable}
+              variant="match"
+            />
+            <Text style={styles.ratingNote}>
+              MATCHは初回Rating確定前でも候補として保存されます。
+            </Text>
+          </View>
         </View>
       </Card>
 
@@ -219,6 +231,19 @@ const styles = StyleSheet.create({
   modeList: {
     gap: 10,
     marginTop: 14,
+  },
+  desktopModeList: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'stretch',
+    gap: 12,
+  },
+  modeItem: {
+    gap: 6,
+  },
+  desktopModeItem: {
+    width: '48%',
+    minWidth: 280,
   },
   disabledMode: {
     minHeight: 58,

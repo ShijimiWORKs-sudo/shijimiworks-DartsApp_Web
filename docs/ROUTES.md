@@ -53,7 +53,8 @@ Expo Router の画面一覧です。
 
 ## 共通導線
 
-- BottomNav: `/home`, `/practice`, `/records`, `/analysis`, `/consult`
+- PC Web TopNavigation: `/home`, `/game`, `/account/profile`
+- BottomNav: Expo Goと1024px未満のWebで `/home`, `/practice`, `/records`, `/analysis`, `/consult`
 - 詳細画面は一覧または関連元へ戻るボタンを持つ
 - 危険操作は確認ダイアログと赤系ボタンを使う
 - プレイ中のゲーム画面はBottomNavを非表示にし、戻る操作は一時停止、継続、途中終了の確認を通す
@@ -65,4 +66,5 @@ Expo Router の画面一覧です。
 - CRICKETは全7ターゲットCLOSE済みでも0点なら自然終了せず、1点以上または15R到達まで継続する
 - MATCHはGAME1 501/701、GAME2 STANDARD CRICKET、1勝1敗時のみGAME3 CHOICE、先に2勝したプレイヤーを勝者にする
 - MATCH内CRICKETは全7ターゲットCLOSE済みでも0点なら自然勝利せず、1点以上または15R到達まで継続する
+- 1024px以上のPC Webではゲームプレイ画面を横長2カラムにし、スコア/状態と入力/操作を分ける。Expo Goと狭幅Webでは既存の縦積みUIを維持する
 - Rating計算本体、Rating履歴の完全実装、効果音・アワード動画はPhase 6の対象外

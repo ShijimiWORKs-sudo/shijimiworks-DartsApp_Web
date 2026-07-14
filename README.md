@@ -78,6 +78,12 @@ npx.cmd expo export --platform web
 
 PC Webの詳細手順は `docs/PC_WEB_SETUP.md` と `docs/PC_WEB_QA_CHECKLIST.md` を参照してください。
 
+PC Web横長UI:
+
+- 1024px以上のWebでは上部ナビゲーションを表示し、主要導線をHOME / GAME / ACCOUNTへ集約します。
+- 1024px未満のWebとExpo Goでは既存のBottomNavを維持します。
+- ゲーム画面はPC Webでスコア/状態と入力/操作を左右に分け、1280x720で主要操作を確認しやすい構成にしています。
+
 ## iPhone Expo Goで確認する
 
 1. iPhone に Expo Go をインストールします。
@@ -190,6 +196,7 @@ Phase 4では、ローカルAccount、OWNER紐付け、Rating Profile、単独Ra
 共通Account契約では、DartsApp / DartsSupportApp連携へ向けてAccount ID、共通JSON、CommonEvent、Outbox、Export / Import検証の境界を追加します。
 Phase 5では、1人用の単独STANDARD CRICKET縦断実装を追加しています。
 Phase 6では、2人対戦MATCH縦断実装を追加しています。
+Phase 8では、PC Web横長ゲームUI、Webトップナビ、1280x720向けのゲーム画面配置を追加しています。
 
 - DBファイル名: `dartsapp_games.db`
 - 保存方式: `expo-sqlite`

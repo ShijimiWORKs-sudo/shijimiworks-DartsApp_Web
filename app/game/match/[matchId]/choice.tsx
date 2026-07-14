@@ -6,6 +6,8 @@ import { AppButton } from '../../../../components/AppButton';
 import { Card } from '../../../../components/Card';
 import { ScreenShell } from '../../../../components/ScreenShell';
 import { SectionTitle } from '../../../../components/SectionTitle';
+import { useDesktopWebLayout } from '../../../../components/web/useDesktopWebLayout';
+import { webGameStyles } from '../../../../components/web/WebGameShell';
 import { colors } from '../../../../constants/theme';
 import { useGameDatabase } from '../../../../contexts/GameDatabaseContext';
 import type { MatchGameMode, MatchState } from '../../../../features/game/domain/match';
@@ -15,6 +17,7 @@ export default function MatchChoiceScreen() {
   const params = useLocalSearchParams<{ matchId: string }>();
   const matchId = Array.isArray(params.matchId) ? params.matchId[0] : params.matchId;
   const { services } = useGameDatabase();
+  const isDesktopWeb = useDesktopWebLayout();
   const [match, setMatch] = useState<MatchState | null>(null);
   const [mode, setMode] = useState<MatchGameMode>('zero_one');
   const [selectedByPlayerId, setSelectedByPlayerId] = useState<string | null>(null);
@@ -126,17 +129,19 @@ export default function MatchChoiceScreen() {
         </View>
       </Card>
 
-      <View style={styles.actions}>
+      <View style={[styles.actions, isDesktopWeb && webGameStyles.desktopFooterActions]}>
         <AppButton
           label="GAME 3開始"
           onPress={() => void handleChoice()}
           disabled={isBusy}
           variant="match"
+          style={isDesktopWeb && webGameStyles.desktopFooterButton}
         />
         <AppButton
           label="MATCHへ戻る"
           onPress={() => router.replace(`/game/match/${match.matchId}`)}
           variant="secondary"
+          style={isDesktopWeb && webGameStyles.desktopFooterButton}
         />
       </View>
     </ScreenShell>

@@ -6,6 +6,8 @@ import { AppButton } from '../../../../components/AppButton';
 import { Card } from '../../../../components/Card';
 import { ScreenShell } from '../../../../components/ScreenShell';
 import { SectionTitle } from '../../../../components/SectionTitle';
+import { useDesktopWebLayout } from '../../../../components/web/useDesktopWebLayout';
+import { WebGameShell, webGameStyles } from '../../../../components/web/WebGameShell';
 import { colors } from '../../../../constants/theme';
 import { useGameDatabase } from '../../../../contexts/GameDatabaseContext';
 import {
@@ -39,6 +41,7 @@ export default function MatchPlayScreen() {
   const params = useLocalSearchParams<{ matchId: string }>();
   const matchId = Array.isArray(params.matchId) ? params.matchId[0] : params.matchId;
   const { services } = useGameDatabase();
+  const isDesktopWeb = useDesktopWebLayout();
   const [match, setMatch] = useState<MatchState | null>(null);
   const [selectedSegment, setSelectedSegment] = useState(20);
   const [selectedArea, setSelectedArea] =
@@ -277,156 +280,183 @@ export default function MatchPlayScreen() {
   return (
     <ScreenShell showNav={false}>
       <Stack.Screen options={{ gestureEnabled: false }} />
-      <SectionTitle
-        title="MATCH"
-        subtitle={`${getPlayerName(match.players, match.players[0]?.playerId)} ${match.players[0]?.gamesWon ?? 0} - ${
-          match.players[1]?.gamesWon ?? 0
-        } ${getPlayerName(match.players, match.players[1]?.playerId)}`}
-      />
-
-      {activeGame ? (
-        <>
-          <Card muted>
-            <SectionTitle
-              title={`GAME ${activeGame.gameNo} ${formatGameMode(activeGame)}`}
-              subtitle={`Round ${activeGame.currentRoundNo} / 15`}
-              tone="card"
-            />
-            <View style={styles.playerRows}>
-              {activeGame.players.map((player) => (
-                <PlayerScoreRow
-                  key={player.playerId}
-                  player={player}
-                  active={player.playerId === activeGame.currentPlayerId}
-                  mode={activeGame.mode}
-                  displayName={getPlayerName(match.players, player.playerId)}
-                />
-              ))}
-            </View>
-          </Card>
-
-          <Card>
-            <SectionTitle
-              title={`${getPlayerName(match.players, activeGame.currentPlayerId)}の投擲`}
-              subtitle={`${activeDarts.length} / 3 darts`}
-              tone="card"
-            />
-            <View style={styles.dartRow}>
-              {activeDarts.map((dart) => (
-                <Text key={dart.id} style={styles.dartText}>
-                  {formatDart(dart.area, dart.segmentNumber)}
-                </Text>
-              ))}
-              {activeDarts.length === 0 ? <Text style={styles.emptyText}>未入力</Text> : null}
-            </View>
-          </Card>
-
-          <Card>
-            <SectionTitle title="入力" tone="card" />
-            <View style={styles.areaGrid}>
-              {(['single', 'double', 'triple'] as const).map((area) => (
-                <OptionButton
-                  key={area}
-                  label={area.toUpperCase()}
-                  selected={selectedArea === area}
-                  onPress={() => setSelectedArea(area)}
-                />
-              ))}
-            </View>
-            <View style={styles.segmentGrid}>
-              {(activeGame.mode === 'cricket' ? cricketSegments : zeroOneSegments).map(
-                (segment) => (
-                  <OptionButton
-                    key={segment}
-                    label={`${segment}`}
-                    selected={selectedSegment === segment}
-                    onPress={() => setSelectedSegment(segment)}
-                  />
-                ),
-              )}
-            </View>
-            <View style={styles.actionGrid}>
-              <AppButton
-                label={`${selectedArea.toUpperCase()} ${selectedSegment}`}
-                onPress={() => recordDart(selectedArea, selectedSegment)}
-                disabled={inputDisabled}
-                variant="match"
-              />
-              <AppButton
-                label="BULL"
-                onPress={() => recordDart('inner_bull', null)}
-                disabled={inputDisabled}
-                variant="secondary"
-              />
-              <AppButton
-                label="MISS"
-                onPress={() => recordDart('miss', null)}
-                disabled={inputDisabled}
-                variant="secondary"
-              />
-            </View>
-          </Card>
-
-          <Card>
-            <SectionTitle title="ターン操作" tone="card" />
-            <View style={styles.actionGrid}>
-              <AppButton
-                label="Undo"
-                onPress={handleUndo}
-                disabled={activeDarts.length === 0 || isBusy}
-                variant="secondary"
-              />
-              <AppButton
-                label="Redo"
-                onPress={handleRedo}
-                disabled={!canRedo || isBusy}
-                variant="secondary"
-              />
-              <AppButton
-                label="ターン確定"
-                onPress={handleConfirmTurn}
-                disabled={isBusy || activeDarts.length === 0}
-              />
-            </View>
-          </Card>
-
-          <Card>
-            <SectionTitle title="手動勝者" subtitle="15R同点時などに使用します。" tone="card" />
-            <View style={styles.actionGrid}>
-              {match.players.map((player) => (
-                <AppButton
-                  key={player.playerId}
-                  label={`${player.displayName} 勝利`}
-                  onPress={() => handleManualWinner(player.playerId)}
-                  disabled={isBusy}
-                  variant="secondary"
-                />
-              ))}
-            </View>
-          </Card>
-        </>
-      ) : (
-        <Card muted>
+      <WebGameShell
+        top={
           <SectionTitle
-            title={getPhaseTitle(match)}
-            subtitle={getPhaseSubtitle(match)}
-            tone="card"
+            title="MATCH"
+            subtitle={`${getPlayerName(match.players, match.players[0]?.playerId)} ${match.players[0]?.gamesWon ?? 0} - ${
+              match.players[1]?.gamesWon ?? 0
+            } ${getPlayerName(match.players, match.players[1]?.playerId)}`}
           />
-          <View style={styles.cardAction}>
+        }
+        left={
+          activeGame ? (
+            <>
+              <Card muted>
+                <SectionTitle
+                  title={`GAME ${activeGame.gameNo} ${formatGameMode(activeGame)}`}
+                  subtitle={`Round ${activeGame.currentRoundNo} / 15`}
+                  tone="card"
+                />
+                <View style={styles.playerRows}>
+                  {activeGame.players.map((player) => (
+                    <PlayerScoreRow
+                      key={player.playerId}
+                      player={player}
+                      active={player.playerId === activeGame.currentPlayerId}
+                      mode={activeGame.mode}
+                      displayName={getPlayerName(match.players, player.playerId)}
+                    />
+                  ))}
+                </View>
+              </Card>
+
+              <Card>
+                <SectionTitle
+                  title={`${getPlayerName(match.players, activeGame.currentPlayerId)}の投擲`}
+                  subtitle={`${activeDarts.length} / 3 darts`}
+                  tone="card"
+                />
+                <View style={styles.dartRow}>
+                  {activeDarts.map((dart) => (
+                    <Text key={dart.id} style={styles.dartText}>
+                      {formatDart(dart.area, dart.segmentNumber)}
+                    </Text>
+                  ))}
+                  {activeDarts.length === 0 ? <Text style={styles.emptyText}>未入力</Text> : null}
+                </View>
+              </Card>
+
+              <Card>
+                <SectionTitle title="ターン操作" tone="card" />
+                <View style={[styles.actionGrid, isDesktopWeb && webGameStyles.desktopActionGrid]}>
+                  <AppButton
+                    label="Undo"
+                    onPress={handleUndo}
+                    disabled={activeDarts.length === 0 || isBusy}
+                    variant="secondary"
+                    style={isDesktopWeb && webGameStyles.desktopActionButton}
+                  />
+                  <AppButton
+                    label="Redo"
+                    onPress={handleRedo}
+                    disabled={!canRedo || isBusy}
+                    variant="secondary"
+                    style={isDesktopWeb && webGameStyles.desktopActionButton}
+                  />
+                  <AppButton
+                    label="ターン確定"
+                    onPress={handleConfirmTurn}
+                    disabled={isBusy || activeDarts.length === 0}
+                    style={isDesktopWeb && webGameStyles.desktopActionButton}
+                  />
+                </View>
+              </Card>
+            </>
+          ) : (
+            <Card muted>
+              <SectionTitle
+                title={getPhaseTitle(match)}
+                subtitle={getPhaseSubtitle(match)}
+                tone="card"
+              />
+              <View style={styles.cardAction}>
+                <AppButton
+                  label={match.phase === 'choice_required' ? 'CHOICEへ進む' : '次のGAMEを開始'}
+                  onPress={handleNextStep}
+                  disabled={isBusy}
+                  variant="match"
+                />
+              </View>
+            </Card>
+          )
+        }
+        right={
+          activeGame ? (
+            <>
+              <Card>
+                <SectionTitle title="入力" tone="card" />
+                <View style={styles.areaGrid}>
+                  {(['single', 'double', 'triple'] as const).map((area) => (
+                    <OptionButton
+                      key={area}
+                      label={area.toUpperCase()}
+                      selected={selectedArea === area}
+                      onPress={() => setSelectedArea(area)}
+                    />
+                  ))}
+                </View>
+                <View style={styles.segmentGrid}>
+                  {(activeGame.mode === 'cricket' ? cricketSegments : zeroOneSegments).map(
+                    (segment) => (
+                      <OptionButton
+                        key={segment}
+                        label={`${segment}`}
+                        selected={selectedSegment === segment}
+                        onPress={() => setSelectedSegment(segment)}
+                      />
+                    ),
+                  )}
+                </View>
+                <View style={[styles.actionGrid, isDesktopWeb && webGameStyles.desktopActionGrid]}>
+                  <AppButton
+                    label={`${selectedArea.toUpperCase()} ${selectedSegment}`}
+                    onPress={() => recordDart(selectedArea, selectedSegment)}
+                    disabled={inputDisabled}
+                    variant="match"
+                    style={isDesktopWeb && webGameStyles.desktopActionButton}
+                  />
+                  <AppButton
+                    label="BULL"
+                    onPress={() => recordDart('inner_bull', null)}
+                    disabled={inputDisabled}
+                    variant="secondary"
+                    style={isDesktopWeb && webGameStyles.desktopActionButton}
+                  />
+                  <AppButton
+                    label="MISS"
+                    onPress={() => recordDart('miss', null)}
+                    disabled={inputDisabled}
+                    variant="secondary"
+                    style={isDesktopWeb && webGameStyles.desktopActionButton}
+                  />
+                </View>
+              </Card>
+
+              <Card>
+                <SectionTitle title="手動勝者" subtitle="15R同点時などに使用します。" tone="card" />
+                <View style={styles.actionGrid}>
+                  {match.players.map((player) => (
+                    <AppButton
+                      key={player.playerId}
+                      label={`${player.displayName} 勝利`}
+                      onPress={() => handleManualWinner(player.playerId)}
+                      disabled={isBusy}
+                      variant="secondary"
+                    />
+                  ))}
+                </View>
+              </Card>
+            </>
+          ) : null
+        }
+        footer={
+          <View style={[styles.footerActions, isDesktopWeb && webGameStyles.desktopFooterActions]}>
             <AppButton
-              label={match.phase === 'choice_required' ? 'CHOICEへ進む' : '次のGAMEを開始'}
-              onPress={handleNextStep}
-              disabled={isBusy}
-              variant="match"
+              label="ゲーム一覧へ"
+              onPress={promptLeave}
+              variant="secondary"
+              style={isDesktopWeb && webGameStyles.desktopFooterButton}
+            />
+            <AppButton
+              label="MATCH中断"
+              onPress={handleAbort}
+              variant="danger"
+              style={isDesktopWeb && webGameStyles.desktopFooterButton}
             />
           </View>
-        </Card>
-      )}
-
-      <View style={styles.footerActions}>
-        <AppButton label="ゲーム一覧へ" onPress={promptLeave} variant="secondary" />
-        <AppButton label="MATCH中断" onPress={handleAbort} variant="danger" />
-      </View>
+        }
+      />
     </ScreenShell>
   );
 }

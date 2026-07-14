@@ -1,13 +1,15 @@
 import type { PropsWithChildren } from 'react';
+import type { StyleProp, ViewStyle } from 'react-native';
 import { StyleSheet, View } from 'react-native';
 
 import { useAppState } from '../contexts/AppStateContext';
 
 type CardProps = PropsWithChildren<{
   muted?: boolean;
+  style?: StyleProp<ViewStyle>;
 }>;
 
-export function Card({ children, muted = false }: CardProps) {
+export function Card({ children, muted = false, style }: CardProps) {
   const { theme } = useAppState();
 
   return (
@@ -18,6 +20,7 @@ export function Card({ children, muted = false }: CardProps) {
           borderColor: theme.border,
           backgroundColor: muted ? theme.mutedCard : theme.surface,
         },
+        style,
       ]}
     >
       {children}

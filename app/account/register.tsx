@@ -7,6 +7,8 @@ import { Card } from '../../components/Card';
 import { AccountLocalNotice } from '../../components/account/AccountLocalNotice';
 import { ScreenShell } from '../../components/ScreenShell';
 import { SectionTitle } from '../../components/SectionTitle';
+import { useDesktopWebLayout } from '../../components/web/useDesktopWebLayout';
+import { webGameStyles } from '../../components/web/WebGameShell';
 import { colors } from '../../constants/theme';
 import { useAppState } from '../../contexts/AppStateContext';
 import { useGameDatabase } from '../../contexts/GameDatabaseContext';
@@ -26,6 +28,7 @@ export default function AccountRegisterScreen() {
   const router = useRouter();
   const appState = useAppState() as AccountAppState;
   const { accountBootstrapStatus, services, isAvailable } = useGameDatabase();
+  const isDesktopWeb = useDesktopWebLayout();
   const accountService = (services as ServicesWithAccount | null)?.account ?? null;
   const activeAccountId = appState.activeAccountId ?? null;
   const setActiveAccountId = appState.setActiveAccountId;
@@ -213,13 +216,19 @@ export default function AccountRegisterScreen() {
 
       {errorMessage ? <Text style={styles.error}>{errorMessage}</Text> : null}
 
-      <View style={styles.actions}>
+      <View style={[styles.actions, isDesktopWeb && webGameStyles.desktopFooterActions]}>
         <AppButton
           label={isSubmitting ? '登録中...' : '登録する'}
           onPress={() => void handleRegister()}
           disabled={isDisabled}
+          style={isDesktopWeb && webGameStyles.desktopFooterButton}
         />
-        <AppButton label="戻る" onPress={() => router.back()} variant="secondary" />
+        <AppButton
+          label="戻る"
+          onPress={() => router.back()}
+          variant="secondary"
+          style={isDesktopWeb && webGameStyles.desktopFooterButton}
+        />
       </View>
     </ScreenShell>
   );

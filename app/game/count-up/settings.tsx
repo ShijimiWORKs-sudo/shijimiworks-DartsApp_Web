@@ -6,6 +6,8 @@ import { AppButton } from '../../../components/AppButton';
 import { Card } from '../../../components/Card';
 import { ScreenShell } from '../../../components/ScreenShell';
 import { SectionTitle } from '../../../components/SectionTitle';
+import { useDesktopWebLayout } from '../../../components/web/useDesktopWebLayout';
+import { webGameStyles } from '../../../components/web/WebGameShell';
 import { colors } from '../../../constants/theme';
 import { useAppState } from '../../../contexts/AppStateContext';
 import { useGameDatabase } from '../../../contexts/GameDatabaseContext';
@@ -21,6 +23,7 @@ export default function CountUpSettingsScreen() {
   const router = useRouter();
   const { profile } = useAppState();
   const { services, isAvailable } = useGameDatabase();
+  const isDesktopWeb = useDesktopWebLayout();
   const [bullRule, setBullRule] = useState<BullRule>('fat_bull');
   const [isStarting, setIsStarting] = useState(false);
 
@@ -114,13 +117,19 @@ export default function CountUpSettingsScreen() {
         </View>
       </Card>
 
-      <View style={styles.actions}>
+      <View style={[styles.actions, isDesktopWeb && webGameStyles.desktopFooterActions]}>
         <AppButton
           label={isStarting ? '開始中...' : 'COUNT-UP開始'}
           onPress={() => void handleStart()}
           disabled={!isAvailable || isStarting}
+          style={isDesktopWeb && webGameStyles.desktopFooterButton}
         />
-        <AppButton label="戻る" onPress={() => router.replace('/game')} variant="secondary" />
+        <AppButton
+          label="戻る"
+          onPress={() => router.replace('/game')}
+          variant="secondary"
+          style={isDesktopWeb && webGameStyles.desktopFooterButton}
+        />
       </View>
     </ScreenShell>
   );

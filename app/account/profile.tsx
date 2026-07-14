@@ -9,6 +9,8 @@ import { AccountSummaryCard } from '../../components/account/AccountSummaryCard'
 import { RatingStatusCard } from '../../components/account/RatingStatusCard';
 import { ScreenShell } from '../../components/ScreenShell';
 import { SectionTitle } from '../../components/SectionTitle';
+import { useDesktopWebLayout } from '../../components/web/useDesktopWebLayout';
+import { webGameStyles } from '../../components/web/WebGameShell';
 import { colors } from '../../constants/theme';
 import { useAppState } from '../../contexts/AppStateContext';
 import { useGameDatabase } from '../../contexts/GameDatabaseContext';
@@ -27,6 +29,7 @@ export default function AccountProfileScreen() {
   const router = useRouter();
   const appState = useAppState() as AccountAppState;
   const { services } = useGameDatabase();
+  const isDesktopWeb = useDesktopWebLayout();
   const accountService = (services as ServicesWithAccount | null)?.account ?? null;
   const activeAccountId = appState.activeAccountId ?? null;
   const [overview, setOverview] = useState<AccountOverview | null>(null);
@@ -171,17 +174,19 @@ export default function AccountProfileScreen() {
 
       {errorMessage ? <Text style={styles.error}>{errorMessage}</Text> : null}
 
-      <View style={styles.actions}>
+      <View style={[styles.actions, isDesktopWeb && webGameStyles.desktopFooterActions]}>
         <AppButton
           label={isSaving ? '保存中...' : '保存する'}
           onPress={() => void handleSave()}
           disabled={!overview || isSaving}
+          style={isDesktopWeb && webGameStyles.desktopFooterButton}
         />
         <AppButton
           label="Rating状態を見る"
           onPress={() => router.push('/account/rating-status')}
           variant="secondary"
           disabled={!overview}
+          style={isDesktopWeb && webGameStyles.desktopFooterButton}
         />
       </View>
     </ScreenShell>

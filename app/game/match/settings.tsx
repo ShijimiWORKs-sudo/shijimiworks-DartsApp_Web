@@ -7,6 +7,8 @@ import { Card } from '../../../components/Card';
 import { AccountLocalNotice } from '../../../components/account/AccountLocalNotice';
 import { ScreenShell } from '../../../components/ScreenShell';
 import { SectionTitle } from '../../../components/SectionTitle';
+import { useDesktopWebLayout } from '../../../components/web/useDesktopWebLayout';
+import { webGameStyles } from '../../../components/web/WebGameShell';
 import { colors } from '../../../constants/theme';
 import { useAppState } from '../../../contexts/AppStateContext';
 import { useGameDatabase } from '../../../contexts/GameDatabaseContext';
@@ -30,6 +32,7 @@ export default function MatchSettingsScreen() {
   const router = useRouter();
   const { activeAccountId, profile } = useAppState();
   const { services, repositories, isAvailable } = useGameDatabase();
+  const isDesktopWeb = useDesktopWebLayout();
   const [zeroOneStartScore, setZeroOneStartScore] = useState<MatchZeroOneStartScore>(501);
   const [outRule, setOutRule] = useState<Exclude<ZeroOneOutRule, 'double_out'>>('single_out');
   const [bullRule, setBullRule] = useState<BullRule>('fat_bull');
@@ -210,14 +213,20 @@ export default function MatchSettingsScreen() {
         </View>
       </Card>
 
-      <View style={styles.actions}>
+      <View style={[styles.actions, isDesktopWeb && webGameStyles.desktopFooterActions]}>
         <AppButton
           label={isStarting ? '開始中...' : 'MATCH開始'}
           onPress={() => void handleStart()}
           disabled={!isAvailable || isStarting}
           variant="match"
+          style={isDesktopWeb && webGameStyles.desktopFooterButton}
         />
-        <AppButton label="戻る" onPress={() => router.replace('/game')} variant="secondary" />
+        <AppButton
+          label="戻る"
+          onPress={() => router.replace('/game')}
+          variant="secondary"
+          style={isDesktopWeb && webGameStyles.desktopFooterButton}
+        />
       </View>
     </ScreenShell>
   );
