@@ -1,11 +1,11 @@
 {
   "expo": {
-    "name": "DartsSupportApp",
-    "slug": "darts-support-app",
+    "name": "DartsApp",
+    "slug": "darts-app",
     "version": "0.1.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "dartssupportapp",
+    "scheme": "dartsapp",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "splash": {
@@ -32,9 +32,25 @@
     "web": {
       "favicon": "./assets/images/icon.png"
     },
-    "plugins": ["expo-router", "expo-sqlite"],
+    "plugins": [
+      [
+        "expo-router",
+        {
+          "headers": {
+            "Cross-Origin-Embedder-Policy": "credentialless",
+            "Cross-Origin-Opener-Policy": "same-origin"
+          }
+        }
+      ],
+      "expo-sqlite"
+    ],
     "extra": {
-      "router": {},
+      "router": {
+        "headers": {
+          "Cross-Origin-Embedder-Policy": "credentialless",
+          "Cross-Origin-Opener-Policy": "same-origin"
+        }
+      },
       "eas": {
         "projectId": "7beb2425-048c-4a04-83ee-59846a446108"
       }

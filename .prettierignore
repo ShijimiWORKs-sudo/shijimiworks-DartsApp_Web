@@ -3,6 +3,7 @@ node_modules
 dist
 coverage
 package-lock.json
+public/_headers
 *.log
 darts_training_app_screen_prompts.md
 deep-research-report.md

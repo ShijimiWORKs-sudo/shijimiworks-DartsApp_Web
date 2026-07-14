@@ -11,6 +11,7 @@ import {
 import type { Dispatch, ReactNode, SetStateAction } from 'react';
 import { Text, View } from 'react-native';
 
+import { WebStartupErrorBoundary } from '../components/WebStartupErrorBoundary';
 import { useAppState } from './AppStateContext';
 import type {
   AccountBootstrapInputs,
@@ -209,6 +210,11 @@ function GameDatabaseRepositoryBridge({
 }
 
 function GameDatabaseErrorBanner({ error }: { error: Error }) {
+  if (typeof window !== 'undefined') {
+    console.error('[DartsApp] Web database initialization failed', error);
+    return <WebStartupErrorBoundary error={error} stage="web_database_init" />;
+  }
+
   return (
     <View
       style={{
