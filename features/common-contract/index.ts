@@ -3,6 +3,7 @@ export * from './application/events';
 export * from './application/exportEnvelope';
 export * from './application/gameSessionMapper';
 export * from './application/importValidator';
+export * from './application/matchMapper';
 export * from './application/ratingMapper';
 export * from './application/validators';
 export * from './domain/types';

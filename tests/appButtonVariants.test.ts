@@ -12,10 +12,12 @@ test('game mode AppButton variants use fixed backgrounds and white labels across
     assert.deepEqual(resolveAppButtonVariantColors('countUp', theme), gameModeButtonColors.countUp);
     assert.deepEqual(resolveAppButtonVariantColors('zeroOne', theme), gameModeButtonColors.zeroOne);
     assert.deepEqual(resolveAppButtonVariantColors('cricket', theme), gameModeButtonColors.cricket);
+    assert.deepEqual(resolveAppButtonVariantColors('match', theme), gameModeButtonColors.match);
 
     assert.equal(resolveAppButtonVariantColors('countUp', theme).labelColor, '#FFFFFF');
     assert.equal(resolveAppButtonVariantColors('zeroOne', theme).labelColor, '#FFFFFF');
     assert.equal(resolveAppButtonVariantColors('cricket', theme).labelColor, '#FFFFFF');
+    assert.equal(resolveAppButtonVariantColors('match', theme).labelColor, '#FFFFFF');
   }
 });
 

@@ -1,7 +1,7 @@
 import type { ThemeColors } from '../constants/theme';
 
 export type AppButtonVariant =
-  'primary' | 'secondary' | 'danger' | 'countUp' | 'zeroOne' | 'cricket';
+  'primary' | 'secondary' | 'danger' | 'countUp' | 'zeroOne' | 'cricket' | 'match';
 
 type AppButtonVariantColors = {
   backgroundColor: string;
@@ -24,7 +24,11 @@ export const gameModeButtonColors = {
     backgroundColor: '#B91C1C',
     labelColor: white,
   },
-} as const satisfies Record<'countUp' | 'zeroOne' | 'cricket', AppButtonVariantColors>;
+  match: {
+    backgroundColor: '#7C3AED',
+    labelColor: white,
+  },
+} as const satisfies Record<'countUp' | 'zeroOne' | 'cricket' | 'match', AppButtonVariantColors>;
 
 export function resolveAppButtonVariantColors(
   variant: AppButtonVariant,
@@ -45,7 +49,12 @@ export function resolveAppButtonVariantColors(
     };
   }
 
-  if (variant === 'countUp' || variant === 'zeroOne' || variant === 'cricket') {
+  if (
+    variant === 'countUp' ||
+    variant === 'zeroOne' ||
+    variant === 'cricket' ||
+    variant === 'match'
+  ) {
     return gameModeButtonColors[variant];
   }
 

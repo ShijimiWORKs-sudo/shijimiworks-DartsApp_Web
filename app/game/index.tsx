@@ -14,17 +14,20 @@ import { useGameDatabase } from '../../contexts/GameDatabaseContext';
 import type { AccountOverview } from '../../features/account/domain';
 import type { CountUpGameState } from '../../features/game/domain/countUp';
 import type { CricketGameState } from '../../features/game/domain/cricket';
+import type { MatchState } from '../../features/game/domain/match';
 import type { ZeroOneGameState } from '../../features/game/domain/zeroOne';
 
 type ActiveGame =
   | { mode: 'count_up'; game: CountUpGameState }
   | { mode: 'zero_one'; game: ZeroOneGameState }
-  | { mode: 'cricket'; game: CricketGameState };
+  | { mode: 'cricket'; game: CricketGameState }
+  | { mode: 'match'; match: MatchState };
 
 type RecentGame =
   | { mode: 'count_up'; game: CountUpGameState }
   | { mode: 'zero_one'; game: ZeroOneGameState }
-  | { mode: 'cricket'; game: CricketGameState };
+  | { mode: 'cricket'; game: CricketGameState }
+  | { mode: 'match'; match: MatchState };
 
 export default function GameHubScreen() {
   const router = useRouter();
@@ -43,30 +46,37 @@ export default function GameHubScreen() {
       activeCountUp,
       activeZeroOne,
       activeCricket,
+      activeMatch,
       recentCountUp,
       recentZeroOne,
       recentCricket,
+      recentMatch,
       account,
     ] = await Promise.all([
       services.countUp.getActiveGame(),
       services.zeroOne.getActiveGame(),
       services.cricket.getActiveGame(),
+      services.match.getActiveMatch(),
       services.countUp.listRecentResults(5),
       services.zeroOne.listRecentResults(5),
       services.cricket.listRecentResults(5),
+      services.match.listRecentResults(5),
       services.account.getActiveAccount(activeAccountId),
     ]);
     setActiveGame(
-      activeCricket
-        ? { mode: 'cricket', game: activeCricket }
-        : activeZeroOne
-          ? { mode: 'zero_one', game: activeZeroOne }
-          : activeCountUp
-            ? { mode: 'count_up', game: activeCountUp }
-            : null,
+      activeMatch
+        ? { mode: 'match', match: activeMatch }
+        : activeCricket
+          ? { mode: 'cricket', game: activeCricket }
+          : activeZeroOne
+            ? { mode: 'zero_one', game: activeZeroOne }
+            : activeCountUp
+              ? { mode: 'count_up', game: activeCountUp }
+              : null,
     );
     setRecentResults(
       [
+        ...recentMatch.map((match) => ({ mode: 'match' as const, match })),
         ...recentCricket.map((game) => ({ mode: 'cricket' as const, game })),
         ...recentZeroOne.map((game) => ({ mode: 'zero_one' as const, game })),
         ...recentCountUp.map((game) => ({ mode: 'count_up' as const, game })),
@@ -85,7 +95,7 @@ export default function GameHubScreen() {
     <ScreenShell>
       <SectionTitle
         title="ゲーム"
-        subtitle="COUNT-UP、単独01、STANDARD CRICKETをDBへ保存しながらプレイできます。"
+        subtitle="COUNT-UP、単独01、STANDARD CRICKET、MATCHをDBへ保存しながらプレイできます。"
       />
 
       {activeGame ? (
@@ -102,7 +112,7 @@ export default function GameHubScreen() {
             />
             <View style={styles.cardAction}>
               <AppButton
-                label={activeGame.game.status === 'paused' ? '再開する' : 'ゲームへ戻る'}
+                label={getActiveStatus(activeGame) === 'paused' ? '再開する' : 'ゲームへ戻る'}
                 onPress={() => router.push(getPlayRoute(activeGame))}
               />
             </View>
@@ -168,6 +178,13 @@ export default function GameHubScreen() {
             variant="cricket"
           />
           <Text style={styles.ratingNote}>{getCricketRatingNote(accountOverview)}</Text>
+          <AppButton
+            label="MATCHを始める"
+            onPress={() => router.push('/game/match/settings')}
+            disabled={!isAvailable}
+            variant="match"
+          />
+          <Text style={styles.ratingNote}>MATCHは初回Rating確定前でも候補として保存されます。</Text>
         </View>
       </Card>
 
@@ -177,7 +194,7 @@ export default function GameHubScreen() {
           <View style={styles.resultList}>
             {recentResults.map((recent) => (
               <Pressable
-                key={`${recent.mode}-${recent.game.gameId}`}
+                key={getRecentKey(recent)}
                 accessibilityRole="button"
                 onPress={() => router.push(getResultRoute(recent))}
                 style={({ pressed }) => [styles.resultRow, pressed && styles.pressed]}
@@ -264,6 +281,9 @@ const styles = StyleSheet.create({
 });
 
 function getPlayRoute(active: ActiveGame) {
+  if (active.mode === 'match') {
+    return `/game/match/${active.match.matchId}`;
+  }
   if (active.mode === 'zero_one') {
     return `/game/01/${active.game.gameId}`;
   }
@@ -274,6 +294,9 @@ function getPlayRoute(active: ActiveGame) {
 }
 
 function getResultRoute(recent: RecentGame) {
+  if (recent.mode === 'match') {
+    return `/game/match/${recent.match.matchId}/result`;
+  }
   if (recent.mode === 'zero_one') {
     return `/game/01/${recent.game.gameId}/result`;
   }
@@ -283,8 +306,21 @@ function getResultRoute(recent: RecentGame) {
   return `/game/count-up/${recent.game.gameId}/result`;
 }
 
+function getRecentKey(recent: RecentGame) {
+  return recent.mode === 'match'
+    ? `${recent.mode}-${recent.match.matchId}`
+    : `${recent.mode}-${recent.game.gameId}`;
+}
+
+function getActiveStatus(active: ActiveGame) {
+  return active.mode === 'match' ? active.match.status : active.game.status;
+}
+
 function getActiveTitle(active: ActiveGame) {
-  const prefix = active.game.status === 'paused' ? '一時停止中の' : '進行中の';
+  const prefix = getActiveStatus(active) === 'paused' ? '一時停止中の' : '進行中の';
+  if (active.mode === 'match') {
+    return `${prefix}MATCH`;
+  }
   if (active.mode === 'zero_one') {
     return `${prefix}01 GAME`;
   }
@@ -295,6 +331,17 @@ function getActiveTitle(active: ActiveGame) {
 }
 
 function getActiveSubtitle(active: ActiveGame) {
+  if (active.mode === 'match') {
+    const activeGame = active.match.activeGame;
+    if (!activeGame) {
+      return active.match.phase === 'choice_required'
+        ? 'GAME 3 CHOICE待ち'
+        : '次のGAMEを開始できます';
+    }
+    return `GAME ${activeGame.gameNo} / Round ${activeGame.currentRoundNo}、${active.match.players
+      .map((player) => `${player.displayName} ${player.gamesWon}`)
+      .join(' - ')}`;
+  }
   if (active.mode === 'zero_one') {
     return `Round ${active.game.currentRoundNo} / 15、残り ${active.game.currentRemainingScore} 点`;
   }
@@ -305,6 +352,12 @@ function getActiveSubtitle(active: ActiveGame) {
 }
 
 function getResultScore(recent: RecentGame) {
+  if (recent.mode === 'match') {
+    const winner = recent.match.players.find(
+      (player) => player.playerId === recent.match.winnerPlayerId,
+    );
+    return `MATCH ${winner?.displayName ?? '-'} WIN`;
+  }
   if (recent.mode === 'zero_one') {
     return `01 残り ${recent.game.result?.finalRemainingScore ?? recent.game.currentRemainingScore} 点`;
   }
@@ -315,6 +368,12 @@ function getResultScore(recent: RecentGame) {
 }
 
 function getResultMeta(recent: RecentGame) {
+  if (recent.mode === 'match') {
+    const score = recent.match.players
+      .map((player) => `${player.displayName} ${player.gamesWon}`)
+      .join(' - ');
+    return `${score} / ${recent.match.completionReason ?? 'completed'}`;
+  }
   if (recent.mode === 'zero_one') {
     return `PPD ${((recent.game.result?.ppdMilli ?? 0) / 1000).toFixed(1)} / ${recent.game.outRule}`;
   }

@@ -7,7 +7,7 @@ MVP v0.1 では実データ連携やAI連携は行わず、端末内ローカル
 ## MVPでできること
 
 - 初期設定: レーティング、利用機種、主な悩みを保存
-- ゲーム: COUNT-UP、単独01、単独STANDARD CRICKETの開始、再開、手入力、undo/redo、一時停止、中断、結果表示
+- ゲーム: COUNT-UP、単独01、単独STANDARD CRICKET、2人対戦MATCHの開始、再開、手入力、undo/redo、一時停止、中断、結果表示
 - Account: 端末内ローカルAccountでRating所有者を識別
 - 練習メニュー: レベル、悩み、ゲーム種別に応じたメニュー表示
 - おすすめ練習: プロフィールと記録に基づく固定ロジック推薦
@@ -164,7 +164,7 @@ npm test
 npm run validate:data
 ```
 
-## Game Database / COUNT-UP / 01 / CRICKET / Account / Rating Foundation
+## Game Database / COUNT-UP / 01 / CRICKET / MATCH / Account / Rating Foundation
 
 Phase 1では、後続のCOUNT-UP / 01 / CRICKET / MATCH実装に向けたSQLiteゲーム基盤を追加しています。
 Phase 2では、COUNT-UPの縦断実装を追加しています。
@@ -172,6 +172,7 @@ Phase 3では、1人用の単独01縦断実装を追加しています。
 Phase 4では、ローカルAccount、OWNER紐付け、Rating Profile、単独Rating候補判定の基盤を追加します。
 共通Account契約では、DartsApp / DartsSupportApp連携へ向けてAccount ID、共通JSON、CommonEvent、Outbox、Export / Import検証の境界を追加します。
 Phase 5では、1人用の単独STANDARD CRICKET縦断実装を追加しています。
+Phase 6では、2人対戦MATCH縦断実装を追加しています。
 
 - DBファイル名: `dartsapp_games.db`
 - 保存方式: `expo-sqlite`
@@ -229,6 +230,22 @@ COUNT-UPでできること:
 - 初回Rating確定前はRating対象外
 - 初回Rating確定後はAccount OWNERの正常完了ゲームを `standalone_cricket` のRating評価候補として保存
 
+2人対戦MATCHでできること:
+
+- `/game` からMATCHを開始
+- `/game/match/settings` でGAME1の開始点501/701、Out、Bull、GAME1先攻、相手Playerを選択
+- GAME1は01、GAME2はSTANDARD CRICKET
+- GAME2の先攻はGAME1先攻ではないプレイヤー
+- 1勝1敗の場合のみ `/game/match/[matchId]/choice` でGAME3の種目と先攻を選択
+- GAME3で01を選んだ場合、開始点はGAME1と同じ501または701
+- 先に2勝したプレイヤーをMATCH勝者として保存
+- 2人対戦CRICKETは全7ターゲットCLOSE済みでも0点なら自然勝利せず、15ラウンド以内は継続
+- `/game/match/[matchId]` で手入力、undo/redo、TURN終了、一時停止、再開、中断、手動勝者確定
+- undo/redoは `darts.status` を `active` / `voided` に更新し、物理削除しない
+- MATCH完了時に `match_player_results`、OWNERのみのpending `rating_evaluations`、`rating_evaluation_games`、`rating_recalculate` Outbox、`common_events`、`common_outbox(local_only)` を作成
+- Rating計算本体とSnapshot更新はPhase 6では実行しない
+- DartsSupportApp通信、API通信、クラウド同期は実装しない
+
 Account / Rating基盤:
 
 - `/account/register` で端末内ローカルAccountを登録
@@ -244,12 +261,12 @@ Account / Rating基盤:
 - `account_id` はUUID v4形のAccount IDを外部契約の正本にします
 - 既存Account IDは書き換えず、旧IDがある場合は段階的移行用の `legacy_account_id` を保持できます
 - OWNER Playerは `players.account_id` でAccountへ紐付き、Rating Profileは `account_id` を所有者として保持します
-- `features/common-contract` がAccount、OWNER profile、Rating、Game Session、CommonEvent、Export Envelopeをsnake_case JSONへ変換します
+- `features/common-contract` がAccount、OWNER profile、Rating、Game Session、MATCH、CommonEvent、Export Envelopeをsnake_case JSONへ変換します
 - `common_events` と `common_outbox` は将来同期用のローカル境界です
 - 現段階のOutbox状態は `local_only` で、DartsSupportApp通信、API通信、クラウド同期は実装しません
 - Importはcontract名、version、UUID、payloadの検証と件数プレビューだけを行い、既存DBを無条件上書きしません
 
-MATCH本体、Rating計算本体、効果音・アワード動画は次フェーズ以降で実装します。
+Rating計算本体、効果音・アワード動画は次フェーズ以降で実装します。
 
 ## App identity
 
@@ -289,6 +306,7 @@ MATCH本体、Rating計算本体、効果音・アワード動画は次フェー
 - `docs/implementation/PHASE_4_REPORT.md`
 - `docs/implementation/DARTSAPP_COMMON_CONTRACT_REPORT.md`
 - `docs/implementation/PHASE_5_REPORT.md`
+- `docs/implementation/PHASE_6_REPORT.md`
 - `docs/implementation/OPEN_QUESTIONS.md`
 - `docs/EAS_BUILD_GUIDE.md`
 - `docs/TESTFLIGHT_PREP.md`
