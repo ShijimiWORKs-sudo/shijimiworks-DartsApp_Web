@@ -214,6 +214,22 @@ iPhone + Expo Go での MVP v0.1 確認用チェックリストです。
 - [ ] `backgroundTheme` が `white` で補完される
 - [ ] 写真スコア関連データがある記録でも消えない
 - [ ] 既存の基準画像データが消えない
+- [ ] Game DB migration 003再実行で壊れない
+- [ ] `common_events` と `common_outbox` が作成される
+- [ ] `PRAGMA foreign_key_check` が空である
+
+## Account / Common Contract
+
+- [ ] Accountプロフィールに共通Account IDが表示される
+- [ ] OWNER PlayerがAccountへ紐付いている
+- [ ] GUESTはaccount_idなしでも扱える
+- [ ] Rating Profileの所有者がaccount_idである
+- [ ] Export JSONにPIN、token、secretが含まれない
+- [ ] Importで不正なcontract_nameを拒否する
+- [ ] Importで未対応contract_versionを拒否する
+- [ ] Importで不正なaccount_id UUIDを拒否する
+- [ ] Outbox初期状態がlocal_onlyである
+- [ ] DartsSupportApp連携、API通信、クラウド同期ボタンが表示されない
 
 ## Theme and Navigation
 

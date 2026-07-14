@@ -110,3 +110,17 @@ DartsSupportApp MVP v0.1 で確認できる機能一覧です。
 - Node.js built-in test runner
 - データ整合性チェック
 - GitHub Actions CI
+
+## Account / 共通データ契約
+
+- 端末内ローカルAccount登録
+- OWNER PlayerとのAccount紐付け
+- Rating Profileのaccount_id所有
+- Accountプロフィールで共通Account IDを表示
+- 共通JSON契約 `darts_common_data` v1
+- Account / OWNER profile / Rating / Game Session mapper
+- CommonEvent生成
+- 将来同期用Outbox
+- Export Envelope生成
+- Import JSON検証と件数プレビュー
+- DartsSupportApp通信、API通信、クラウド同期は未実装

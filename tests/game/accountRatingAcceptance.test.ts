@@ -133,7 +133,7 @@ test('Phase 4 migration upgrades the game database to account/rating schema v2',
   const db = await createMigratedTestDatabase();
   try {
     const version = await db.getFirstAsync<{ user_version: number }>('PRAGMA user_version;');
-    assert.equal(version?.user_version, 2);
+    assert.equal(version?.user_version, 3);
 
     const requiredTables = [
       'accounts',

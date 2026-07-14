@@ -10,6 +10,12 @@ import {
   ACCOUNT_RATING_FOUNDATION_VERSION,
   runAccountRatingFoundationMigration,
 } from './002_account_rating_foundation';
+import {
+  COMMON_ACCOUNT_CONTRACT_CHECKSUM,
+  COMMON_ACCOUNT_CONTRACT_NAME,
+  COMMON_ACCOUNT_CONTRACT_VERSION,
+  runCommonAccountContractMigration,
+} from './003_common_account_contract';
 import type { GameDatabaseExecutor } from '../types';
 
 export type GameDatabaseMigration = {
@@ -31,5 +37,11 @@ export const GAME_DATABASE_MIGRATIONS: GameDatabaseMigration[] = [
     name: ACCOUNT_RATING_FOUNDATION_NAME,
     checksum: ACCOUNT_RATING_FOUNDATION_CHECKSUM,
     up: runAccountRatingFoundationMigration,
+  },
+  {
+    version: COMMON_ACCOUNT_CONTRACT_VERSION,
+    name: COMMON_ACCOUNT_CONTRACT_NAME,
+    checksum: COMMON_ACCOUNT_CONTRACT_CHECKSUM,
+    up: runCommonAccountContractMigration,
   },
 ];

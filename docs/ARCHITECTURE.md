@@ -9,6 +9,7 @@ Expo Router のルート画面を配置します。
 - `app/index.tsx`: 初期設定
 - `app/home.tsx`: ホーム、ゲーム開始/再開導線
 - `app/game*.tsx`: ゲームハブ、COUNT-UP設定/プレイ/結果、01設定/プレイ/結果、CRICKET設定/プレイ/結果
+- `app/account*.tsx`: ローカルAccount登録、共通Account ID表示、Rating状態表示
 - `app/practice*.tsx`: 練習メニューと履歴
 - `app/record.tsx`: 練習記録入力
 - `app/records*.tsx`: 練習記録一覧/詳細/編集
@@ -90,6 +91,7 @@ SQLite DB:
 - migration: `PRAGMA user_version` と `db_migrations`
 - v1: 19テーブル、Outbox、投擲の `client_action_id` 冪等制約、進行中GAME/MATCHの一意制約
 - v2: Account、OWNER紐付け、Rating Profile、Rating Evaluation v2、Rating Snapshot v2、migration orphan保存
+- v3: 共通Account契約用 `common_events`、`common_outbox`、段階的移行用 `accounts.legacy_account_id`
 - SQL正本: `docs/specs/DartsApp_DB_v1_schema.sql`
 
 COUNT-UP:
@@ -142,6 +144,20 @@ Account機能は端末内でRating所有者を識別するためのローカル�
 Phase 4では`auth_provider = 'local'`のみを扱い、パスワード、クラウド認証、本人確認トークンは保存しません。
 
 OWNER PlayerはAccountに紐づきます。GUEST Playerは`account_id = NULL`のままで、正式Rating Profile、Rating Evaluation、Rating Snapshotを持ちません。
+
+## features/common-contract/
+
+DartsApp / DartsSupportAppの将来連携に向けた外部JSON契約境界です。
+
+- `domain/types.ts`: snake_case JSON契約、CommonEvent、CommonOutbox、Export Envelope
+- `application/accountMapper.ts`: AccountとOWNER/GUEST profileの共通JSON変換
+- `application/ratingMapper.ts`: Rating Profileの共通JSON変換
+- `application/gameSessionMapper.ts`: 完了済みゲームセッションの共通JSON変換
+- `application/events.ts`: `account_created`、`game_session_completed`、`rating_updated`などのCommonEvent生成
+- `application/exportEnvelope.ts`: `contract_name = darts_common_data`、`contract_version = 1` のExport Envelope生成
+- `application/importValidator.ts`: Import JSONの検証とプレビュー
+
+内部DB型は既存のcamelCase/SQLite構造を維持し、外部境界だけsnake_caseへ変換します。Importは検証のみで、既存データの無条件上書きやDartsSupportApp通信は行いません。
 
 ## features/game/domain/rating/
 
