@@ -151,20 +151,21 @@ export default function GameHubScreen() {
             label="COUNT-UPを始める"
             onPress={() => router.push('/game/count-up/settings')}
             disabled={!isAvailable}
+            variant="countUp"
           />
           <Text style={styles.ratingNote}>COUNT-UPはRating対象外です。</Text>
           <AppButton
             label="01 GAMEを始める"
             onPress={() => router.push('/game/01/settings')}
             disabled={!isAvailable}
-            variant="secondary"
+            variant="zeroOne"
           />
           <Text style={styles.ratingNote}>{getZeroOneRatingNote(accountOverview)}</Text>
           <AppButton
             label="STANDARD CRICKETを始める"
             onPress={() => router.push('/game/cricket/settings')}
             disabled={!isAvailable}
-            variant="secondary"
+            variant="cricket"
           />
           <Text style={styles.ratingNote}>{getCricketRatingNote(accountOverview)}</Text>
         </View>
