@@ -8,7 +8,7 @@ Expo Router のルート画面を配置します。
 
 - `app/index.tsx`: 初期設定
 - `app/home.tsx`: ホーム、ゲーム開始/再開導線
-- `app/game*.tsx`: ゲームハブ、COUNT-UP設定/プレイ/結果、01設定/プレイ/結果、CRICKET設定/プレイ/結果
+- `app/game*.tsx`: ゲームハブ、COUNT-UP設定/プレイ/結果、01設定/プレイ/結果、CRICKET設定/プレイ/結果、MATCH設定/プレイ/CHOICE/結果
 - `app/account*.tsx`: ローカルAccount登録、共通Account ID表示、Rating状態表示
 - `app/practice*.tsx`: 練習メニューと履歴
 - `app/record.tsx`: 練習記録入力
@@ -70,6 +70,7 @@ Expo Router のルート画面を配置します。
 - `CountUpGameService`
 - `ZeroOneGameService`
 - `CricketGameService`
+- `MatchGameService`
 - `AccountService`
 - `StandaloneRatingCandidateService`
 
@@ -79,11 +80,11 @@ Expo Router のルート画面を配置します。
 
 ゲーム機能は画面から分離し、次のレイヤーに分けます。
 
-- `domain/`: enum値、ドメイン型、COUNT-UP/01/CRICKETスコア計算、ID生成、ゲーム領域エラー
-- `application/`: Repository port、COUNT-UP/01/CRICKETアプリケーションサービス
+- `domain/`: enum値、ドメイン型、COUNT-UP/01/CRICKET/MATCHスコア計算、ID生成、ゲーム領域エラー
+- `application/`: Repository port、COUNT-UP/01/CRICKET/MATCHアプリケーションサービス
 - `infrastructure/sqlite/`: DB初期化、migration、Repository実装、row mapper
 
-Phase 2ではCOUNT-UPの縦断実装を追加しています。Phase 3では単独01の縦断実装を追加します。Phase 5では単独STANDARD CRICKETの縦断実装を追加します。画面は `CountUpGameService`、`ZeroOneGameService`、`CricketGameService` を通じてSQLiteへ保存し、既存AsyncStorageのPracticeRecordへは直接書き込みません。完了時は `integration_outbox` と `practice_record_links` にpending状態を作り、後続フェーズの同期処理境界にします。
+Phase 2ではCOUNT-UPの縦断実装を追加しています。Phase 3では単独01の縦断実装を追加します。Phase 5では単独STANDARD CRICKETの縦断実装を追加します。Phase 6では2人対戦MATCHの縦断実装を追加します。画面は `CountUpGameService`、`ZeroOneGameService`、`CricketGameService`、`MatchGameService` を通じてSQLiteへ保存し、既存AsyncStorageのPracticeRecordへは直接書き込みません。単独ゲーム完了時は `integration_outbox` と `practice_record_links` にpending状態を作り、後続フェーズの同期処理境界にします。MATCH完了時はOWNERのみのRating Evaluation候補、`rating_recalculate` Outbox、CommonEvent、`common_outbox(local_only)` を作成します。
 
 SQLite DB:
 
@@ -92,6 +93,7 @@ SQLite DB:
 - v1: 19テーブル、Outbox、投擲の `client_action_id` 冪等制約、進行中GAME/MATCHの一意制約
 - v2: Account、OWNER紐付け、Rating Profile、Rating Evaluation v2、Rating Snapshot v2、migration orphan保存
 - v3: 共通Account契約用 `common_events`、`common_outbox`、段階的移行用 `accounts.legacy_account_id`
+- Phase 6ではmigration 004を追加せず、`PRAGMA user_version = 3` を維持
 - SQL正本: `docs/specs/DartsApp_DB_v1_schema.sql`
 
 COUNT-UP:
@@ -133,6 +135,22 @@ COUNT-UP:
 - 初回Rating確定後、Account OWNERの完了ゲームは `source_type = 'standalone_cricket'` のpending `rating_evaluations` と `rating_recalculate` Outboxを作成する
 - Rating計算本体とSnapshot適用はPhase 5では実行しない
 
+2人対戦MATCH:
+
+- `matches` と `match_players` を親にし、各GAMEは `game_sessions.match_id` と `match_game_no` で紐付ける
+- GAME1は `mode = 'zero_one'`、開始点は501または701
+- GAME2は `mode = 'cricket'`、先攻はGAME1先攻ではないプレイヤー
+- 1勝1敗時のみ `choice_required` となり、GAME3の01/CRICKETと先攻をユーザーが選択する
+- GAME3で01を選んだ場合はGAME1と同じ開始点を保存する
+- 先に2勝したPlayerを `matches.winner_player_id` として確定し、`match_player_results` を保存する
+- 2人対戦01は15R上限、ラウンド上限時は残り点が少ないPlayerを勝者、完全同点は手動勝者を要求する
+- 2人対戦CRICKETは相手が未CLOSEのターゲットへのOver Markだけ得点化し、全CLOSE済みでも0点なら自然勝利しない
+- 2人対戦CRICKETの15R上限は得点、CLOSE数、Marks順で比較し、完全同点は手動勝者を要求する
+- undo/redoは画面セッション内だけRedo候補を持ち、DBでは `darts.status` を `active` / `voided` に更新して物理削除しない
+- MATCHは初回Rating確定前でもOWNER Playerの `source_type = 'match'` 評価候補を作成する
+- GUEST PlayerにはRating Evaluation、Rating Profile、Rating Snapshotを作成しない
+- Rating計算本体とSnapshot適用、DartsSupportApp通信はPhase 6では実行しない
+
 ## features/account/
 
 Account機能は端末内でRating所有者を識別するためのローカル基盤です。
@@ -153,6 +171,7 @@ DartsApp / DartsSupportAppの将来連携に向けた外部JSON契約境界で�
 - `application/accountMapper.ts`: AccountとOWNER/GUEST profileの共通JSON変換
 - `application/ratingMapper.ts`: Rating Profileの共通JSON変換
 - `application/gameSessionMapper.ts`: 完了済みゲームセッションの共通JSON変換
+- `application/matchMapper.ts`: 完了済みMATCHの共通JSON変換
 - `application/events.ts`: `account_created`、`game_session_completed`、`rating_updated`などのCommonEvent生成
 - `application/exportEnvelope.ts`: `contract_name = darts_common_data`、`contract_version = 1` のExport Envelope生成
 - `application/importValidator.ts`: Import JSONの検証とプレビュー
@@ -202,6 +221,8 @@ Node.js built-in test runner で pure TypeScript ロジックを検証します�
 - COUNT-UPサービスとSQLite永続化
 - CRICKETドメイン計算
 - CRICKETサービスとSQLite永続化
+- MATCHドメイン計算
+- MATCHサービスとSQLite永続化
 - データ整合性
 - 資料検索
 
