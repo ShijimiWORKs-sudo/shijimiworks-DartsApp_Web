@@ -92,12 +92,57 @@ test('common game session json is snake_case and marks DartsApp as source', () =
   });
 
   assert.equal(game.account_id, accountId);
+  assert.equal(game.game_id, game.session_id);
+  assert.equal(game.mode, 'zero_one');
   assert.equal(game.game_type, 'ZERO_ONE');
   assert.equal(game.game_variant, '501');
   assert.equal(game.source_app, 'darts_app');
   assert.equal(game.source_record_id, game.session_id);
   assert.equal(game.summary.ppd, 21.8);
   assert.equal(game.summary.three_dart_average, 65.4);
+});
+
+test('common game session json maps STANDARD CRICKET summary without external sync', () => {
+  const game = toCommonGameSessionJson({
+    id: '4c1b6cc8-b46a-4984-b21e-faf15e0dd6e5',
+    accountId,
+    mode: 'cricket',
+    variant: 'fat_bull',
+    status: 'completed',
+    startedAt: now,
+    completedAt: '2026-07-13T10:20:00.000Z',
+    completionReason: 'all_closed_with_score',
+    ratingEligible: true,
+    ratingCandidate: true,
+    score: 42,
+    cricketScore: 42,
+    ppdMilli: null,
+    threeDartAverageMilli: null,
+    mprMilli: 2333,
+    marksTotal: 28,
+    closedNumberCount: 7,
+    roundsCount: 10,
+    dartsThrown: 30,
+    bullCount: 2,
+    tripleCount: 3,
+    doubleCount: 4,
+    bustCount: 0,
+  });
+
+  assert.equal(game.game_id, '4c1b6cc8-b46a-4984-b21e-faf15e0dd6e5');
+  assert.equal(game.account_id, accountId);
+  assert.equal(game.mode, 'cricket');
+  assert.equal(game.game_type, 'CRICKET');
+  assert.equal(game.completed_at, '2026-07-13T10:20:00.000Z');
+  assert.equal(game.completion_reason, 'all_closed_with_score');
+  assert.equal(game.rating_candidate, true);
+  assert.equal(game.summary.cricket_score, 42);
+  assert.equal(game.summary.marks_total, 28);
+  assert.equal(game.summary.mpr_milli, 2333);
+  assert.equal(game.summary.closed_number_count, 7);
+  assert.equal(game.summary.rounds_count, 10);
+  assert.equal(game.summary.darts_thrown, 30);
+  assert.equal(game.source_app, 'darts_app');
 });
 
 test('common events and outbox default to DartsApp and local_only', () => {

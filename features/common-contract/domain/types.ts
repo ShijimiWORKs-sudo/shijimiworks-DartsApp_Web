@@ -70,18 +70,28 @@ export type CommonRatingJson = {
 
 export type CommonGameSessionJson = {
   session_id: string;
+  game_id: string;
   account_id: string;
+  mode: 'count_up' | 'zero_one' | 'cricket' | 'match';
   game_type: 'COUNT_UP' | 'ZERO_ONE' | 'CRICKET' | 'MATCH';
   game_variant: string | null;
   status: 'completed' | 'aborted' | 'invalid';
   started_at: string | null;
   completed_at: string | null;
+  completion_reason: string | null;
   rating_eligible: boolean;
+  rating_candidate: boolean;
   summary: {
     score: number | null;
+    cricket_score: number | null;
     ppd: number | null;
     three_dart_average: number | null;
     mpr: number | null;
+    mpr_milli: number | null;
+    marks_total: number | null;
+    closed_number_count: number | null;
+    rounds_count: number | null;
+    darts_thrown: number | null;
     bull_count: number;
     triple_count: number;
     double_count: number;

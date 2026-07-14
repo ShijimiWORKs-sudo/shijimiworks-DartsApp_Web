@@ -8,7 +8,7 @@ Expo Router のルート画面を配置します。
 
 - `app/index.tsx`: 初期設定
 - `app/home.tsx`: ホーム、ゲーム開始/再開導線
-- `app/game*.tsx`: ゲームハブ、COUNT-UP設定/プレイ/結果、01設定/プレイ/結果
+- `app/game*.tsx`: ゲームハブ、COUNT-UP設定/プレイ/結果、01設定/プレイ/結果、CRICKET設定/プレイ/結果
 - `app/account*.tsx`: ローカルAccount登録、共通Account ID表示、Rating状態表示
 - `app/practice*.tsx`: 練習メニューと履歴
 - `app/record.tsx`: 練習記録入力
@@ -69,6 +69,7 @@ Expo Router のルート画面を配置します。
 - `PlayerRepository` / `MatchRepository` / `GameRepository` / `RatingRepository` / `IntegrationOutboxRepository`
 - `CountUpGameService`
 - `ZeroOneGameService`
+- `CricketGameService`
 - `AccountService`
 - `StandaloneRatingCandidateService`
 
@@ -78,11 +79,11 @@ Expo Router のルート画面を配置します。
 
 ゲーム機能は画面から分離し、次のレイヤーに分けます。
 
-- `domain/`: enum値、ドメイン型、COUNT-UP/01スコア計算、ID生成、ゲーム領域エラー
-- `application/`: Repository port、COUNT-UP/01アプリケーションサービス
+- `domain/`: enum値、ドメイン型、COUNT-UP/01/CRICKETスコア計算、ID生成、ゲーム領域エラー
+- `application/`: Repository port、COUNT-UP/01/CRICKETアプリケーションサービス
 - `infrastructure/sqlite/`: DB初期化、migration、Repository実装、row mapper
 
-Phase 2ではCOUNT-UPの縦断実装を追加しています。Phase 3では単独01の縦断実装を追加します。画面は `CountUpGameService` または `ZeroOneGameService` を通じてSQLiteへ保存し、既存AsyncStorageのPracticeRecordへは直接書き込みません。完了時は `integration_outbox` と `practice_record_links` にpending状態を作り、後続フェーズの同期処理境界にします。
+Phase 2ではCOUNT-UPの縦断実装を追加しています。Phase 3では単独01の縦断実装を追加します。Phase 5では単独STANDARD CRICKETの縦断実装を追加します。画面は `CountUpGameService`、`ZeroOneGameService`、`CricketGameService` を通じてSQLiteへ保存し、既存AsyncStorageのPracticeRecordへは直接書き込みません。完了時は `integration_outbox` と `practice_record_links` にpending状態を作り、後続フェーズの同期処理境界にします。
 
 SQLite DB:
 
@@ -117,6 +118,20 @@ COUNT-UP:
 - 初回Rating確定前は `rating_candidate = 0`
 - 初回Rating確定後、Account OWNERの完了ゲームは `rating_candidate = 1` とし、pending `rating_evaluations` と `rating_recalculate` Outboxを作成する
 - Rating計算本体とSnapshot適用はPhase 4では実行しない
+
+単独STANDARD CRICKET:
+
+- 単独ゲームとして `game_sessions.mode = 'cricket'` に保存
+- `max_rounds = 15`、1プレイヤー、Rating確定前はRating対象外
+- 対象は20/19/18/17/16/15/BULLで、3マーク以上をCLOSEとして `cricket_number_states` に保存する
+- CLOSE後のOver MarkだけをCRICKET得点へ加算する
+- 全7ターゲットCLOSEかつCRICKET得点1点以上で `completion_reason = 'all_closed_with_score'` として自然終了する
+- 全7ターゲットCLOSE済みでもCRICKET得点0点の場合は自然終了せず、15R到達時に `completion_reason = 'round_limit'`、`clearFlag = false` で完了する
+- MPRは有効マーク合計を確定TURN数で割り、milli単位で保存する
+- undo/redoは `darts.status` を `active` / `voided` に更新し、物理削除しない
+- 完了時に `game_player_results`、`integration_outbox`、`practice_record_links` を作成する
+- 初回Rating確定後、Account OWNERの完了ゲームは `source_type = 'standalone_cricket'` のpending `rating_evaluations` と `rating_recalculate` Outboxを作成する
+- Rating計算本体とSnapshot適用はPhase 5では実行しない
 
 ## features/account/
 
@@ -185,6 +200,8 @@ Node.js built-in test runner で pure TypeScript ロジックを検証します�
 - migration
 - COUNT-UPドメイン計算
 - COUNT-UPサービスとSQLite永続化
+- CRICKETドメイン計算
+- CRICKETサービスとSQLite永続化
 - データ整合性
 - 資料検索
 
