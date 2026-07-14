@@ -1,9 +1,13 @@
 import { GameDatabaseError } from '../../domain/errors';
 import { GAME_DATABASE_MIGRATIONS } from './migrations';
+import { runGameDatabaseTransaction } from './transaction';
+import type { GameDatabaseTransactionRuntime } from './transaction';
 import type { GameDatabaseConnection, GameDatabaseExecutor } from './types';
 
 export const GAME_DATABASE_FILE_NAME = 'dartsapp_games.db';
 export const GAME_DATABASE_CURRENT_VERSION = 3;
+
+const initializationPromises = new Map<string, Promise<void>>();
 
 export async function applyGameDatabasePragmas(db: GameDatabaseExecutor): Promise<void> {
   await db.execAsync('PRAGMA journal_mode = WAL;');
@@ -21,7 +25,10 @@ async function setUserVersion(db: GameDatabaseExecutor, version: number): Promis
   await db.execAsync(`PRAGMA user_version = ${version};`);
 }
 
-export async function migrateGameDatabase(db: GameDatabaseConnection): Promise<void> {
+export async function migrateGameDatabase(
+  db: GameDatabaseConnection,
+  runtime?: GameDatabaseTransactionRuntime,
+): Promise<void> {
   await applyGameDatabasePragmas(db);
   let currentVersion = await getUserVersion(db);
 
@@ -30,18 +37,22 @@ export async function migrateGameDatabase(db: GameDatabaseConnection): Promise<v
       continue;
     }
 
-    await db.withExclusiveTransactionAsync(async (transaction) => {
-      await migration.up(transaction);
-      await transaction.runAsync(
-        `INSERT INTO db_migrations(version, name, checksum, applied_at)
-         VALUES (?, ?, ?, ?)`,
-        migration.version,
-        migration.name,
-        migration.checksum,
-        new Date().toISOString(),
-      );
-      await setUserVersion(transaction, migration.version);
-    });
+    await runGameDatabaseTransaction(
+      db,
+      async (transaction) => {
+        await migration.up(transaction);
+        await transaction.runAsync(
+          `INSERT INTO db_migrations(version, name, checksum, applied_at)
+           VALUES (?, ?, ?, ?)`,
+          migration.version,
+          migration.name,
+          migration.checksum,
+          new Date().toISOString(),
+        );
+        await setUserVersion(transaction, migration.version);
+      },
+      runtime,
+    );
 
     currentVersion = migration.version;
   }
@@ -53,9 +64,34 @@ export async function migrateGameDatabase(db: GameDatabaseConnection): Promise<v
   }
 }
 
-export async function initializeGameDatabase(db: GameDatabaseConnection): Promise<void> {
+export async function initializeGameDatabase(
+  db: GameDatabaseConnection,
+  databaseName = GAME_DATABASE_FILE_NAME,
+  runtime?: GameDatabaseTransactionRuntime,
+): Promise<void> {
+  const pendingInitialization = initializationPromises.get(databaseName);
+
+  if (pendingInitialization) {
+    await pendingInitialization;
+    return;
+  }
+
+  const initialization = initializeGameDatabaseOnce(db, runtime);
+  initializationPromises.set(databaseName, initialization);
+
   try {
-    await migrateGameDatabase(db);
+    await initialization;
+  } finally {
+    initializationPromises.delete(databaseName);
+  }
+}
+
+async function initializeGameDatabaseOnce(
+  db: GameDatabaseConnection,
+  runtime?: GameDatabaseTransactionRuntime,
+): Promise<void> {
+  try {
+    await migrateGameDatabase(db, runtime);
   } catch (error) {
     throw new GameDatabaseError('Failed to initialize the game database.', { cause: error });
   }

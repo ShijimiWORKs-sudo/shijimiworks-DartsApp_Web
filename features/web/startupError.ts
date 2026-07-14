@@ -11,17 +11,22 @@ export type WebStartupErrorDetails = {
 
 const fallbackMessage =
   'ブラウザを再読み込みしてください。問題が続く場合は、開発者コンソールのログを確認してください。';
+const accessHandleMessage =
+  '同じブラウザでDartsAppを開いている別のタブを閉じ、この画面を再読み込みしてください。';
 
 export function buildWebStartupErrorDetails(
   error: unknown,
   stage: WebStartupErrorStage = 'unknown',
 ): WebStartupErrorDetails {
   const normalizedError = normalizeError(error);
+  const isAccessHandleConflict = hasAccessHandleConflict(error);
 
   return {
     title: 'DartsAppを起動できませんでした。',
-    message: 'Webデータベースの初期化に失敗しました。',
-    recoveryAction: fallbackMessage,
+    message: isAccessHandleConflict
+      ? 'DartsAppのデータベースを開けませんでした。'
+      : 'Webデータベースの初期化に失敗しました。',
+    recoveryAction: isAccessHandleConflict ? accessHandleMessage : fallbackMessage,
     stage,
     developerName: normalizedError.name,
     developerMessage: normalizedError.message,
@@ -47,4 +52,40 @@ function normalizeError(error: unknown): { name: string; message: string } {
     name: 'Error',
     message: 'Unknown error',
   };
+}
+
+function hasAccessHandleConflict(error: unknown): boolean {
+  return collectErrorText(error).some((text) => {
+    const lowerText = text.toLowerCase();
+    return (
+      lowerText.includes('nomodificationallowederror') ||
+      lowerText.includes('createsyncaccesshandle') ||
+      lowerText.includes('another open access handle') ||
+      lowerText.includes('writablestream associated with the same file')
+    );
+  });
+}
+
+function collectErrorText(error: unknown, seen = new Set<unknown>()): string[] {
+  if (error === null || error === undefined || seen.has(error)) {
+    return [];
+  }
+  seen.add(error);
+
+  if (error instanceof Error) {
+    const parts = [error.name, error.message];
+    const cause = 'cause' in error ? (error as { cause?: unknown }).cause : undefined;
+    return [...parts, ...collectErrorText(cause, seen)].filter((part) => part.length > 0);
+  }
+
+  if (typeof error === 'string') {
+    return [error];
+  }
+
+  if (typeof error === 'object') {
+    const cause = 'cause' in error ? (error as { cause?: unknown }).cause : undefined;
+    return collectErrorText(cause, seen);
+  }
+
+  return [String(error)];
 }

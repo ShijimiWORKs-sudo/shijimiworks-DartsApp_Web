@@ -103,7 +103,13 @@ function createProxyServer(targetPort) {
   });
 
   server.on('upgrade', (request, socket, head) => {
-    const upstream = net.connect(targetPort, '127.0.0.1', () => {
+    let upstream;
+
+    socket.on('error', () => {
+      upstream?.destroy();
+    });
+
+    upstream = net.connect(targetPort, '127.0.0.1', () => {
       upstream.write(`${request.method} ${request.url} HTTP/${request.httpVersion}\r\n`);
 
       const headers = {

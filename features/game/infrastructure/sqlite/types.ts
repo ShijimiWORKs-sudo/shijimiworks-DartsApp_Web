@@ -16,4 +16,5 @@ export type GameDatabaseConnection = GameDatabaseExecutor & {
   withExclusiveTransactionAsync(
     task: (transaction: GameDatabaseExecutor) => Promise<void>,
   ): Promise<void>;
+  withTransactionAsync(task: () => Promise<void>): Promise<void>;
 };

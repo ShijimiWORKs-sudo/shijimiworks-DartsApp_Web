@@ -30,6 +30,7 @@ import {
 } from '../features/game/infrastructure/sqlite/database';
 import { createGameRepositories } from '../features/game/infrastructure/sqlite/repositories';
 import type { GameDatabaseConnection } from '../features/game/infrastructure/sqlite/types';
+import { createDeferredErrorHandler } from '../features/web/deferredError';
 
 type GameDatabaseContextValue = {
   isInitializing: boolean;
@@ -66,17 +67,21 @@ export function GameDatabaseProvider({ children }: { children: ReactNode }) {
     await initializeGameDatabase(db);
   }, []);
 
-  const handleError = useCallback((error: Error) => {
-    setValue({
-      isInitializing: false,
-      isAvailable: false,
-      initializationError: error,
-      accountBootstrapStatus: 'temporarilyUnavailable',
-      accountBootstrapError: error,
-      repositories: null,
-      services: null,
-    });
-  }, []);
+  const handleError = useMemo(
+    () =>
+      createDeferredErrorHandler((error: Error) => {
+        setValue({
+          isInitializing: false,
+          isAvailable: false,
+          initializationError: error,
+          accountBootstrapStatus: 'temporarilyUnavailable',
+          accountBootstrapError: error,
+          repositories: null,
+          services: null,
+        });
+      }),
+    [],
+  );
 
   if (value.initializationError) {
     return (

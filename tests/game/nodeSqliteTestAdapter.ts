@@ -46,6 +46,17 @@ export class NodeSqliteTestDatabase implements GameDatabaseConnection {
     }
   }
 
+  async withTransactionAsync(task: () => Promise<void>): Promise<void> {
+    this.db.exec('BEGIN');
+    try {
+      await task();
+      this.db.exec('COMMIT');
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
+  }
+
   close(): void {
     this.db.close();
   }

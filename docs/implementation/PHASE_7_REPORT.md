@@ -63,6 +63,16 @@ Root cause:
     `Cross-Origin-Opener-Policy: same-origin`.
 - Static hosting headers were added via `public/_headers`.
 - PC Web setup and QA docs were added.
+- Web DB initialization fixes after device verification:
+  - Web uses `withTransactionAsync` instead of unsupported `withExclusiveTransactionAsync`.
+  - Native keeps `withExclusiveTransactionAsync`.
+  - Game DB initialization is serialized by database file name so concurrent calls await the same
+    Promise.
+  - Failed initialization Promises are not cached permanently, allowing retry after reload.
+  - SQLiteProvider `onError` state updates are deferred to the next tick to avoid React render-time
+    update warnings.
+  - Access Handle conflicts are mapped to user-facing guidance to close another DartsApp tab and
+    reload.
 
 Metro, Web export, browser smoke, and final validation results are recorded below.
 
@@ -112,7 +122,7 @@ Before Phase 7 edits:
 - `npm.cmd run typecheck`: PASS
 - `npm.cmd run lint`: PASS
 - `npm.cmd run format:check`: PASS
-- `npm.cmd test`: PASS, 188 tests
+- `npm.cmd test`: PASS, 195 tests
 - `npm.cmd run validate:data`: PASS
 - `npm.cmd run web -- --port 8104 --clear`: PASS
   - HTML response returned COEP / COOP headers.
@@ -125,6 +135,26 @@ Before Phase 7 edits:
 - Chrome headless smoke: PASS, `<title>DartsApp</title>` confirmed.
 - Edge headless smoke: PASS, `<title>DartsApp</title>` confirmed.
   - Edge emitted a Chromium renderer task-manager warning to stderr, but DOM retrieval succeeded.
+
+## PR #9 Web DB Initialization Fix Validation
+
+- `withExclusiveTransactionAsync is not supported on web` cause:
+  - migration and write services called `withExclusiveTransactionAsync` directly.
+  - Web now routes all game DB transactions through `runGameDatabaseTransaction`.
+- Access Handle conflict cause:
+  - Browser SQLite Web can hold a sync access handle per opened DB file.
+  - Same-tab concurrent initialization is serialized in app code.
+  - Another tab, reload overlap, or Chrome / Edge simultaneous open can still hit browser-level
+    exclusive handle limits, so the technical error is converted to tab cleanup guidance.
+- React warning cause:
+  - SQLiteProvider could invoke `onError` while its own render path was active.
+  - GameDatabaseProvider now defers error state updates with a microtask.
+
+Validation after fix:
+
+- `npm.cmd run typecheck`: PASS
+- `npm.cmd run lint`: PASS
+- `npm.cmd test`: PASS, 195 tests
 
 ## Known Alpha Limitations
 
