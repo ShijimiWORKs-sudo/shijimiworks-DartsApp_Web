@@ -9,7 +9,7 @@
 
 現在のリポジトリは、SQLiteゲーム基盤、COUNT-UP、単独01、単独STANDARD CRICKET、Account/Rating基盤、共通Account契約を持つ一方、README、app config、QA、主要route、BottomNav、Support系機能の多くが `DartsSupportApp` として残っている。
 
-Phase 6 MATCHはPR #7 `Phase 6: two-player match vertical slice` で実装済み・main未マージであることをread-onlyで確認した。したがって、MATCH本体は不足機能ではなく「実装済み・マージ待ち・実機確認待ち」として扱う。
+Phase 6 MATCHはPR #7 `Phase 6: two-player match vertical slice` で実装され、main merge commit `5c5cfa17e28987cdb2b5815e09ea5dbaed1dc77c` によりmainへ取り込まれた。実機確認も完了しているため、MATCH本体は不足機能ではなく実装済み機能として扱う。
 
 短期の正式DartsAppは Windows PC Web / Chrome / Edge / PC横長画面であるため、現状は「DartsAppゲーム基盤」と「DartsSupportApp MVP UI」が同居している状態と判断する。
 
@@ -31,16 +31,16 @@ Phase 6 MATCHはPR #7 `Phase 6: two-player match vertical slice` で実装済み
 | GAP-011 | フルスクリーン/キーボード操作 | PC Web QA項目として未整備                             | PC筐体利用に弱い             | P1       |
 | GAP-012 | USB/Webカメラ対応方針         | Expo ImagePicker中心                                  | Windows PC Web利用に不明点   | P2       |
 
-## 3. 実装済み・マージ待ち・実機確認待ち
+## 3. 実装済み機能
 
-| 項目             | 確認元                                         | 状態                              |
-| ---------------- | ---------------------------------------------- | --------------------------------- |
-| 2人対戦MATCH     | PR #7 Phase 6: two-player match vertical slice | IMPLEMENTED_IN_PR_PENDING_MERGE   |
-| 501 / 701        | `MatchGameService`, `domain/match/**`          | PR #7で実装済み                   |
-| STANDARD CRICKET | GAME 2 sequence                                | PR #7で実装済み                   |
-| CHOICE           | `/game/match/[matchId]/choice`                 | PR #7で実装済み                   |
-| MATCH Rating候補 | Rating Evaluation v2 candidate                 | PR #7で実装済み、計算本体は未実装 |
-| MATCH共通契約    | `matchMapper.ts`, `matchContract.test.ts`      | PR #7で実装済み                   |
+| 項目             | 確認元                                         | 状態                               |
+| ---------------- | ---------------------------------------------- | ---------------------------------- |
+| 2人対戦MATCH     | PR #7 Phase 6: two-player match vertical slice | IMPLEMENTED                        |
+| 501 / 701        | `MatchGameService`, `domain/match/**`          | mainへマージ済み                   |
+| STANDARD CRICKET | GAME 2 sequence                                | mainへマージ済み                   |
+| CHOICE           | `/game/match/[matchId]/choice`                 | mainへマージ済み                   |
+| MATCH Rating候補 | Rating Evaluation v2 candidate                 | mainへマージ済み、計算本体は未実装 |
+| MATCH共通契約    | `matchMapper.ts`, `matchContract.test.ts`      | mainへマージ済み                   |
 
 ## 4. DartsAppに混入している可能性があるSupport機能
 
@@ -95,40 +95,40 @@ Unable to resolve "./wa-sqlite/wa-sqlite.wasm" from "node_modules/expo-sqlite/we
 
 ## 7. 共通契約にすべき項目
 
-| 項目                          | 現状                           | 判断               |
-| ----------------------------- | ------------------------------ | ------------------ |
-| `account_id`                  | common-contract実装済み        | SHARED_CONTRACT    |
-| OWNER/GUEST profile           | mapper実装済み                 | SHARED_CONTRACT    |
-| Rating Profile                | mapper実装済み                 | SHARED_CONTRACT    |
-| Game Session JSON             | COUNT-UP/01/CRICKET mapperあり | SHARED_CONTRACT    |
-| MATCH JSON                    | PR #7で実装済み・main未マージ  | KEEP pending merge |
-| CommonEvent                   | `common_events`あり            | SHARED_CONTRACT    |
-| CommonOutbox                  | `common_outbox.local_only`あり | SHARED_CONTRACT    |
-| PracticeRecord link           | `practice_record_links`あり    | SHARED_CONTRACT    |
-| Board coordinate / hit source | photo-score utilsに実装        | REVIEW             |
-| Export / Import validation    | common-contractに実装          | SHARED_CONTRACT    |
+| 項目                          | 現状                           | 判断             |
+| ----------------------------- | ------------------------------ | ---------------- |
+| `account_id`                  | common-contract実装済み        | SHARED_CONTRACT  |
+| OWNER/GUEST profile           | mapper実装済み                 | SHARED_CONTRACT  |
+| Rating Profile                | mapper実装済み                 | SHARED_CONTRACT  |
+| Game Session JSON             | COUNT-UP/01/CRICKET mapperあり | SHARED_CONTRACT  |
+| MATCH JSON                    | mainへマージ済み               | KEEP implemented |
+| CommonEvent                   | `common_events`あり            | SHARED_CONTRACT  |
+| CommonOutbox                  | `common_outbox.local_only`あり | SHARED_CONTRACT  |
+| PracticeRecord link           | `practice_record_links`あり    | SHARED_CONTRACT  |
+| Board coordinate / hit source | photo-score utilsに実装        | REVIEW           |
+| Export / Import validation    | common-contractに実装          | SHARED_CONTRACT  |
 
 ## 8. 仕様書と実装の不一致
 
-| ID       | 仕様                                    | 実装                                            | 影響                     |
-| -------- | --------------------------------------- | ----------------------------------------------- | ------------------------ |
-| SPEC-001 | DartsAppはWindows PC Web主用途          | README/app.jsonはDartsSupportApp/iPhone中心     | product boundary不一致   |
-| SPEC-002 | MATCH routeあり                         | PR #7で `/game/match/**` 実装済み・main未マージ | 実機確認とmainマージ待ち |
-| SPEC-003 | Rating概要 `/rating`, `/rating/history` | 実装は `/account/rating-status` のみ            | route差分                |
-| SPEC-004 | PC Chrome/Edge正式QA                    | QAはiPhone + Expo Go                            | 受入条件不足             |
-| SPEC-005 | リアルタイム判定/USBカメラ              | 静止画photo-scoreのみ                           | 主機能不足               |
-| SPEC-006 | Award効果音/動画                        | 素材候補のみ、再生未実装                        | 演出不足                 |
-| SPEC-007 | DartsSupportAppへゲーム重複実装しない   | このrepoにSupport routeと正式ゲームが同居       | 2アプリ境界が曖昧        |
+| ID       | 仕様                                    | 実装                                        | 影響                   |
+| -------- | --------------------------------------- | ------------------------------------------- | ---------------------- |
+| SPEC-001 | DartsAppはWindows PC Web主用途          | README/app.jsonはDartsSupportApp/iPhone中心 | product boundary不一致 |
+| SPEC-002 | MATCH routeあり                         | mainで `/game/match/**` 実装済み            | 解消済み               |
+| SPEC-003 | Rating概要 `/rating`, `/rating/history` | 実装は `/account/rating-status` のみ        | route差分              |
+| SPEC-004 | PC Chrome/Edge正式QA                    | QAはiPhone + Expo Go                        | 受入条件不足           |
+| SPEC-005 | リアルタイム判定/USBカメラ              | 静止画photo-scoreのみ                       | 主機能不足             |
+| SPEC-006 | Award効果音/動画                        | 素材候補のみ、再生未実装                    | 演出不足               |
+| SPEC-007 | DartsSupportAppへゲーム重複実装しない   | このrepoにSupport routeと正式ゲームが同居   | 2アプリ境界が曖昧      |
 
 ## 9. DBと画面の不一致
 
-| ID     | DB                                                 | 画面/Service                                      | 判断               |
-| ------ | -------------------------------------------------- | ------------------------------------------------- | ------------------ |
-| DB-001 | `matches`, `match_players`, `match_player_results` | PR #7でMATCH画面・service実装済み・main未マージ   | merge待ち          |
-| DB-002 | `rating_evaluations.source_type = match`           | PR #7でMATCH Rating候補実装済み、計算本体は未実装 | P2                 |
-| DB-003 | `rating_snapshots`                                 | Snapshot更新エンジンなし                          | P2                 |
-| DB-004 | `common_events`, `common_outbox`                   | UIでExport/Import実行なし                         | 連携前までは許容   |
-| DB-005 | `practice_record_links`                            | Support AppState recordsと併存                    | 契約境界として整理 |
+| ID     | DB                                                 | 画面/Service                               | 判断               |
+| ------ | -------------------------------------------------- | ------------------------------------------ | ------------------ |
+| DB-001 | `matches`, `match_players`, `match_player_results` | mainでMATCH画面・service実装済み           | 解消済み           |
+| DB-002 | `rating_evaluations.source_type = match`           | MATCH Rating候補実装済み、計算本体は未実装 | P2                 |
+| DB-003 | `rating_snapshots`                                 | Snapshot更新エンジンなし                   | P2                 |
+| DB-004 | `common_events`, `common_outbox`                   | UIでExport/Import実行なし                  | 連携前までは許容   |
+| DB-005 | `practice_record_links`                            | Support AppState recordsと併存             | 契約境界として整理 |
 
 ## 10. 残るPC Web不足機能
 
