@@ -101,6 +101,23 @@ export type CommonGameSessionJson = {
   source_record_id: string;
 };
 
+export type CommonMatchJson = {
+  match_id: string;
+  account_id: string;
+  status: 'completed' | 'aborted' | 'invalid';
+  zero_one_start_score: 501 | 701;
+  out_rule: 'single_out' | 'master_out';
+  bull_rule: 'fat_bull' | 'separate_bull';
+  winner_player_id: string | null;
+  loser_player_id: string | null;
+  games_won: Record<string, number>;
+  game_ids: string[];
+  completed_at: string | null;
+  rating_candidate: boolean;
+  source_app: 'darts_app';
+  source_record_id: string;
+};
+
 export type CommonEvent = {
   event_id: string;
   event_type: CommonEventType;
