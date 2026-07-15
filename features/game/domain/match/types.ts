@@ -177,6 +177,7 @@ export type MatchResultSummary = {
   gamesWon: Record<string, number>;
   gameIds: string[];
   zeroOnePpdMilli: number | null;
+  zeroOneThreeDartAverageMilli: number | null;
   cricketMprMilli: number | null;
   totalDarts: number;
   totalRounds: number;

@@ -76,6 +76,11 @@ test('game result screens use source Rating results instead of only profile stat
   const countUp = readText('app/game/count-up/[gameId]/result.tsx');
   assert.match(countUp, /RatingResultCard/);
   assert.match(countUp, /countUp/);
+  const matchResult = readText('app/game/match/[matchId]/result.tsx');
+  assert.match(matchResult, /01 PPD/);
+  assert.match(matchResult, /01 3DA/);
+  assert.match(matchResult, /zeroOneThreeDartAverageMilli/);
+  assert.match(matchResult, /ratingResult\.status === 'applied'/);
   assert.match(
     readText('components/game/RatingResultCard.tsx'),
     /COUNT-UPはRating計算には使用されません/,

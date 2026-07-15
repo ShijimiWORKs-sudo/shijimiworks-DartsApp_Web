@@ -464,12 +464,20 @@ async function applyEvaluationUpdateInTransaction(
   const profile = await loadRatingProfile(transaction, target.account_id);
   const ownershipReason =
     !profile || profile.owner_player_id !== target.player_id ? 'OWNER_NOT_LINKED' : null;
+  const observationRangeReasons = findObservationRangeExclusions(target);
 
-  if (target.candidate_flag !== 1 || revisionReason || ownershipReason || !profile) {
+  if (
+    target.candidate_flag !== 1 ||
+    revisionReason ||
+    ownershipReason ||
+    observationRangeReasons.length > 0 ||
+    !profile
+  ) {
     const reasons = [
       target.candidate_flag !== 1 ? 'CANDIDATE_FLAG_DISABLED' : null,
       revisionReason,
       ownershipReason,
+      ...observationRangeReasons,
       !profile ? 'RATING_PROFILE_NOT_FOUND' : null,
     ].filter((reason): reason is string => reason !== null);
     await markExcluded(transaction, target, reasons, calculationDateTime);
@@ -504,6 +512,23 @@ async function applyEvaluationUpdateInTransaction(
     evaluationId,
     accountId: target.account_id,
   };
+}
+
+function findObservationRangeExclusions(target: RatingEvaluationRow) {
+  const reasons: string[] = [];
+  if (
+    target.zero_one_ppd_milli !== null &&
+    (target.zero_one_ppd_milli < 0 || target.zero_one_ppd_milli > 60_000)
+  ) {
+    reasons.push('INVALID_PPD_RANGE');
+  }
+  if (
+    target.cricket_mpr_milli !== null &&
+    (target.cricket_mpr_milli < 0 || target.cricket_mpr_milli > 9_000)
+  ) {
+    reasons.push('INVALID_MPR_RANGE');
+  }
+  return reasons;
 }
 
 async function buildRatingUpdateInput(
@@ -998,6 +1023,9 @@ function formatGeneralExclusionReason(reasonCodes: string[]) {
   }
   if (reasonCodes.includes('SUPERSEDED_REVISION')) {
     return '新しい評価リビジョンがあるため、古い評価はRating計算から除外しました。';
+  }
+  if (reasonCodes.includes('INVALID_PPD_RANGE') || reasonCodes.includes('INVALID_MPR_RANGE')) {
+    return 'Rating観測値が仕様範囲外のため、Rating計算から除外しました。';
   }
   if (reasonCodes.length > 0) {
     return 'Rating対象条件を満たさなかったため、Rating計算には使用されませんでした。';

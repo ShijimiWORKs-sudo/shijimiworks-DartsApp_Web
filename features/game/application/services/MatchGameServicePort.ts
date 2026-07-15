@@ -31,4 +31,8 @@ export type MatchGameServicePort = {
   pauseMatch(matchId: string): Promise<MatchState>;
   resumeMatch(matchId: string): Promise<MatchState>;
   abortMatch(matchId: string): Promise<void>;
+  ensureRatingEvaluationCurrent(matchId: string): Promise<{
+    evaluationId: string | null;
+    recalculationRequired: boolean;
+  }>;
 };

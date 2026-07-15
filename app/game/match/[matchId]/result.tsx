@@ -39,8 +39,16 @@ export default function MatchResultScreen() {
             router.replace('/game');
             return;
           }
-          if (mounted) setMatch(nextMatch);
-          await services.rating.processPending();
+          const repairResult = await services.match.ensureRatingEvaluationCurrent(
+            nextMatch.matchId,
+          );
+          if (repairResult.recalculationRequired && repairResult.evaluationId) {
+            await services.rating.recalculateFromEvaluation(repairResult.evaluationId);
+          } else {
+            await services.rating.processPending();
+          }
+          const displayMatch = await services.match.loadMatch(nextMatch.matchId);
+          if (mounted) setMatch(displayMatch);
           const nextRatingResult = await services.rating.getRatingResultForSource({
             sourceMatchId: nextMatch.matchId,
           });
@@ -91,6 +99,7 @@ export default function MatchResultScreen() {
             <ResultStat label="Games" value={result?.gameIds.length ?? 0} />
             <ResultStat label="Darts" value={result?.totalDarts ?? 0} />
             <ResultStat label="01 PPD" value={formatMilli(result?.zeroOnePpdMilli)} />
+            <ResultStat label="01 3DA" value={formatMilli(result?.zeroOneThreeDartAverageMilli)} />
             <ResultStat label="CR MPR" value={formatMilli(result?.cricketMprMilli)} />
             <ResultStat label="Bull" value={result?.bullCount ?? 0} />
             <ResultStat label="Triple" value={result?.tripleCount ?? 0} />
@@ -101,7 +110,7 @@ export default function MatchResultScreen() {
 
         <Card style={isDesktopWeb && webGameStyles.desktopGridCard}>
           <SectionTitle title="連携状態" tone="card" />
-          <Text style={styles.outboxText}>{formatRating(result)}</Text>
+          <Text style={styles.outboxText}>{formatRating(result, ratingResult)}</Text>
           <Text style={styles.outboxText}>{formatOutbox(result)}</Text>
         </Card>
 
@@ -159,9 +168,26 @@ function formatMilli(value: number | null | undefined) {
   return value === null || value === undefined ? '-' : (value / 1000).toFixed(2);
 }
 
-function formatRating(result: MatchResultSummary | null | undefined) {
+function formatRating(
+  result: MatchResultSummary | null | undefined,
+  ratingResult: RatingSourceResult | null,
+) {
+  if (ratingResult) {
+    if (ratingResult.status === 'applied') {
+      return ratingResult.isInitialEstablished
+        ? '初回Rating確定として反映済みです。'
+        : '参考Rating更新として反映済みです。';
+    }
+    if (ratingResult.status === 'processing') {
+      return 'Rating評価処理中です。';
+    }
+    if (ratingResult.status === 'excluded' || ratingResult.status === 'not_target') {
+      return ratingResult.message;
+    }
+  }
+
   return result?.ratingCandidate
-    ? 'OWNER PlayerのRating Evaluation v2候補として保存済みです。'
+    ? 'Rating Evaluation v2候補として保存済みです。'
     : 'Rating候補は作成されていません。';
 }
 

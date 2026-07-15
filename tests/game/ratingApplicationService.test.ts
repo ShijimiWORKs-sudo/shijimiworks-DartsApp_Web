@@ -164,6 +164,51 @@ test('rating application excludes GUEST or owner-mismatched evaluations without 
   }
 });
 
+test('rating application excludes out-of-range PPD and MPR observations', async () => {
+  const db = await createMigratedTestDatabase();
+  try {
+    const fixture = await createRatingFixture(db);
+    await seedMatchEvaluation(db, fixture, {
+      index: 1,
+      completedAt: '2026-07-10T00:00:00.000Z',
+      ppdMilli: 157_750,
+      mprMilli: 1_800,
+      result: 'win',
+      completionReason: 'two_zero',
+    });
+    await seedMatchEvaluation(db, fixture, {
+      index: 2,
+      completedAt: '2026-07-11T00:00:00.000Z',
+      ppdMilli: 21_000,
+      mprMilli: 9_001,
+      result: 'loss',
+      completionReason: 'two_one',
+    });
+
+    const service = new RatingApplicationService(new SqliteRatingRepository(db), () => NOW);
+    const ppdResult = await service.applyEvaluation('eval-match-rating-1', NOW);
+    const mprResult = await service.applyEvaluation('eval-match-rating-2', NOW);
+
+    assert.equal(ppdResult.status, 'excluded');
+    assert.deepEqual(ppdResult.reasonCodes, ['INVALID_PPD_RANGE']);
+    assert.equal(mprResult.status, 'excluded');
+    assert.deepEqual(mprResult.reasonCodes, ['INVALID_MPR_RANGE']);
+
+    const snapshots = await db.getFirstAsync<{ count: number }>(
+      `SELECT COUNT(*) AS count
+       FROM rating_snapshots
+       WHERE evaluation_id IN ('eval-match-rating-1', 'eval-match-rating-2')`,
+    );
+    assert.equal(snapshots?.count, 0);
+
+    const profile = await loadRatingProfileForAssert(db, fixture.accountId);
+    assert.equal(profile?.eligible_match_count, 0);
+    assert.equal(profile?.measurement_status, 'unmeasured');
+  } finally {
+    db.close();
+  }
+});
+
 test('rating history lists latest valid snapshots and source result details', async () => {
   const db = await createMigratedTestDatabase();
   try {

@@ -32,6 +32,13 @@ type CricketPlayerProgress = {
   targetMarks: Record<CricketTarget, number>;
 };
 
+export type ZeroOneRatingStats = {
+  effectiveScore: number;
+  ratingDarts: number;
+  ppdMilli: number | null;
+  threeDartAverageMilli: number | null;
+};
+
 export function assertValidMatchPlayers(
   player1Id: string,
   player2Id: string,
@@ -307,10 +314,7 @@ export function summarizeMatchResult(input: {
     .flatMap((game) =>
       game.turns.filter((turn) => ['confirmed', 'bust', 'checkout'].includes(turn.status)),
     );
-  const zeroOneScore = zeroOneTurns.reduce((sum, turn) => sum + turn.appliedScore, 0);
-  const zeroOneDarts = zeroOneTurns.flatMap((turn) =>
-    turn.darts.filter((dart) => dart.status === 'active'),
-  ).length;
+  const zeroOneStats = calculateZeroOneRatingStats(zeroOneTurns);
   const cricketTurns = input.games
     .filter((game) => game.mode === 'cricket')
     .flatMap((game) =>
@@ -321,7 +325,8 @@ export function summarizeMatchResult(input: {
   return {
     gamesWon: countMatchGamesWon(input.games),
     gameIds: input.games.map((game) => game.gameId),
-    zeroOnePpdMilli: zeroOneDarts === 0 ? null : Math.round((zeroOneScore * 1000) / zeroOneDarts),
+    zeroOnePpdMilli: zeroOneStats.ppdMilli,
+    zeroOneThreeDartAverageMilli: zeroOneStats.threeDartAverageMilli,
     cricketMprMilli:
       cricketTurns.length === 0 ? null : Math.round((cricketMarks * 1000) / cricketTurns.length),
     totalDarts: activeDarts.length,
@@ -338,6 +343,55 @@ export function summarizeMatchResult(input: {
     manualWinner: input.games.some((game) => Boolean(game.manualWinnerReason)),
     ratingCandidate: input.ratingCandidate,
     commonOutboxStatus: input.commonOutboxStatus ?? null,
+  };
+}
+
+export function calculateZeroOneRatingStats(
+  turns: Pick<MatchTurn, 'status' | 'appliedScore' | 'isBust' | 'isCheckout' | 'darts'>[],
+): ZeroOneRatingStats {
+  const totals = turns.reduce(
+    (sum, turn) => {
+      const turnStats = calculateZeroOneTurnRatingStats(turn);
+      return {
+        effectiveScore: sum.effectiveScore + turnStats.effectiveScore,
+        ratingDarts: sum.ratingDarts + turnStats.ratingDarts,
+      };
+    },
+    { effectiveScore: 0, ratingDarts: 0 },
+  );
+
+  return {
+    ...totals,
+    ppdMilli:
+      totals.ratingDarts === 0
+        ? null
+        : Math.round((totals.effectiveScore * 1000) / totals.ratingDarts),
+    threeDartAverageMilli:
+      totals.ratingDarts === 0
+        ? null
+        : Math.round((totals.effectiveScore * 3 * 1000) / totals.ratingDarts),
+  };
+}
+
+export function calculateZeroOneTurnRatingStats(
+  turn: Pick<MatchTurn, 'status' | 'appliedScore' | 'isBust' | 'isCheckout' | 'darts'>,
+): Pick<ZeroOneRatingStats, 'effectiveScore' | 'ratingDarts'> {
+  if (!['confirmed', 'bust', 'checkout'].includes(turn.status)) {
+    return { effectiveScore: 0, ratingDarts: 0 };
+  }
+
+  const activeDarts = turn.darts.filter((dart) => dart.status === 'active').length;
+  if (activeDarts === 0) {
+    return { effectiveScore: 0, ratingDarts: 0 };
+  }
+
+  if (turn.isBust || turn.status === 'bust') {
+    return { effectiveScore: 0, ratingDarts: activeDarts };
+  }
+
+  return {
+    effectiveScore: turn.appliedScore,
+    ratingDarts: turn.isCheckout || turn.status === 'checkout' ? activeDarts : 3,
   };
 }
 

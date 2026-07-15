@@ -25,6 +25,9 @@ Implemented:
 - Source revision recalculation with Evaluation invalidation, Snapshot invalidation, chronological replay, and Profile restoration
 - Shared active Account resolution for Home, Account profile, Rating status, Rating detail, and Rating history
 - Direct `/account/rating` and `/account/rating/history` access restores a registered local Account before showing unregistered copy
+- MATCH 01 PPD and 3DA are stored and displayed as separate values
+- MATCH Rating observations use weighted effective score / Rating darts across all 01 games
+- Out-of-range Rating observations are excluded with `INVALID_PPD_RANGE` or `INVALID_MPR_RANGE`
 
 Not implemented in this phase:
 
@@ -89,6 +92,13 @@ Source revision recalculation:
 6. Keep invalidated Snapshot rows as history while freeing the Evaluation unique key for replayed Snapshots
 7. Align Rating Profile with the final replayed Snapshot
 
+MATCH observation repair:
+
+- Completed MATCH result loading can re-sync game and match result stats from raw turn/dart rows
+- If the stored Rating Evaluation no longer matches the corrected MATCH observation, a new `source_revision` is created
+- The new revision is passed to Rating recalculation so old Evaluations/Snapshots are invalidated and Profile is rebuilt from the latest valid Snapshot
+- Existing Account and user data are not deleted
+
 ## UI
 
 `/account/rating-status`, `/account/rating`, `/account/rating/history`, Home, and Game Hub now display updated Rating Profile values after pending processing:
@@ -109,6 +119,7 @@ Game result screens now display Rating result status by source Evaluation:
 - STANDARD CRICKET result: applied / excluded / processing / not_target
 - MATCH result: applied / excluded / processing / not_target
 - COUNT-UP result: always Rating対象外
+- MATCH result stats display `01 PPD`, `01 3DA`, and `CR MPR` with labels matching the stored values
 
 Active Account resolution:
 
@@ -146,7 +157,17 @@ Added coverage:
 - Rating detail/history routes use shared active Account resolution
 - Rating detail keeps the history button enabled for registered unmeasured Accounts
 - Rating history distinguishes loading, no Account, and 0 Snapshot states
+- MATCH PPD = effective score / Rating darts
+- MATCH 3DA = PPD * 3
+- MATCH 01 PPD is weighted across multiple 01 games by total effective score and total Rating darts
+- BUST turns count zero effective score and actual darts
+- 1-2 dart manual turn endings count as 3 Rating darts
+- CHECKOUT turns count actual checkout darts
+- Voided darts are not counted
+- PPD > 60 and MPR > 9 are excluded before Snapshot/Profile updates
+- MATCH result screen shows PPD and 3DA separately
+- MATCH source revision repair creates a new revision when stored PPD is stale
 
 Final test suite result during implementation:
 
-- `npm.cmd test`: 263 passed
+- `npm.cmd test`: 268 passed

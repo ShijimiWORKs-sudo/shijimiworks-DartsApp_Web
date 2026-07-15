@@ -115,6 +115,172 @@ test('MATCH completes 2-0 with owner rating evaluation and local-only common out
   }
 });
 
+test('MATCH saves weighted 01 PPD separately from three dart average for rating', async () => {
+  const db = await createMigratedTestDatabase();
+  try {
+    const { service, ownerPlayerId, guestPlayerId } = await createMatchFixture(db);
+    let match = await service.startMatch({
+      zeroOneStartScore: 501,
+      outRule: 'single_out',
+      bullRule: 'fat_bull',
+      player1Id: ownerPlayerId,
+      player2Id: guestPlayerId,
+      game1FirstThrowPlayerId: ownerPlayerId,
+    });
+
+    match = await service.recordDart(match.matchId, {
+      area: 'single',
+      segmentNumber: 20,
+      clientActionId: 'match-rating-dart-1',
+    });
+    match = await service.recordDart(match.matchId, {
+      area: 'single',
+      segmentNumber: 20,
+      clientActionId: 'match-rating-dart-2',
+    });
+    match = await service.confirmTurn(match.matchId);
+    match = await service.completeCurrentGameByManualWinner(match.matchId, {
+      winnerPlayerId: ownerPlayerId,
+      reason: 'manual game one winner',
+    });
+    match = await service.startNextGame(match.matchId);
+    match = await service.completeCurrentGameByManualWinner(match.matchId, {
+      winnerPlayerId: ownerPlayerId,
+      reason: 'manual game two winner',
+    });
+
+    const zeroOneResult = await db.getFirstAsync<{
+      ppd_milli: number | null;
+      three_dart_average_milli: number | null;
+      extra_stats_json: string;
+    }>(
+      `SELECT r.ppd_milli, r.three_dart_average_milli, r.extra_stats_json
+       FROM game_player_results r
+       JOIN game_sessions g ON g.id = r.game_id
+       WHERE g.match_id = ? AND g.mode = 'zero_one' AND r.player_id = ?`,
+      match.matchId,
+      ownerPlayerId,
+    );
+    assert.equal(zeroOneResult?.ppd_milli, 13333);
+    assert.equal(zeroOneResult?.three_dart_average_milli, 40000);
+    assert.match(zeroOneResult?.extra_stats_json ?? '', /"zeroOneRatingDarts":3/);
+
+    const matchResult = await db.getFirstAsync<{
+      zero_one_ppd_milli: number | null;
+      zero_one_three_dart_average_milli: number | null;
+    }>(
+      `SELECT zero_one_ppd_milli, zero_one_three_dart_average_milli
+       FROM match_player_results
+       WHERE match_id = ? AND player_id = ?`,
+      match.matchId,
+      ownerPlayerId,
+    );
+    assert.equal(matchResult?.zero_one_ppd_milli, 13333);
+    assert.equal(matchResult?.zero_one_three_dart_average_milli, 40000);
+
+    const evaluation = await db.getFirstAsync<{
+      zero_one_ppd_milli: number | null;
+      cricket_mpr_milli: number | null;
+    }>(
+      `SELECT zero_one_ppd_milli, cricket_mpr_milli
+       FROM rating_evaluations
+       WHERE source_match_id = ? AND player_id = ?`,
+      match.matchId,
+      ownerPlayerId,
+    );
+    assert.equal(evaluation?.zero_one_ppd_milli, 13333);
+
+    const evaluationGame = await db.getFirstAsync<{
+      ppd_milli: number | null;
+      three_dart_average_milli: number | null;
+    }>(
+      `SELECT g.ppd_milli, g.three_dart_average_milli
+       FROM rating_evaluation_games g
+       JOIN rating_evaluations e ON e.id = g.evaluation_id
+       WHERE e.source_match_id = ? AND g.mode = 'zero_one'`,
+      match.matchId,
+    );
+    assert.equal(evaluationGame?.ppd_milli, 13333);
+    assert.equal(evaluationGame?.three_dart_average_milli, 40000);
+
+    assert.equal(match.result?.zeroOnePpdMilli, 13333);
+    assert.equal(match.result?.zeroOneThreeDartAverageMilli, 40000);
+  } finally {
+    db.close();
+  }
+});
+
+test('MATCH rating repair creates a new source revision when stored PPD is stale', async () => {
+  const db = await createMigratedTestDatabase();
+  try {
+    const { service, ownerPlayerId, guestPlayerId } = await createMatchFixture(db);
+    let match = await service.startMatch({
+      zeroOneStartScore: 501,
+      outRule: 'single_out',
+      bullRule: 'fat_bull',
+      player1Id: ownerPlayerId,
+      player2Id: guestPlayerId,
+      game1FirstThrowPlayerId: ownerPlayerId,
+    });
+
+    match = await service.recordDart(match.matchId, {
+      area: 'single',
+      segmentNumber: 20,
+      clientActionId: 'match-repair-dart-1',
+    });
+    match = await service.recordDart(match.matchId, {
+      area: 'single',
+      segmentNumber: 20,
+      clientActionId: 'match-repair-dart-2',
+    });
+    match = await service.confirmTurn(match.matchId);
+    match = await service.completeCurrentGameByManualWinner(match.matchId, {
+      winnerPlayerId: ownerPlayerId,
+      reason: 'manual game one winner',
+    });
+    match = await service.startNextGame(match.matchId);
+    match = await service.completeCurrentGameByManualWinner(match.matchId, {
+      winnerPlayerId: ownerPlayerId,
+      reason: 'manual game two winner',
+    });
+
+    await db.runAsync(
+      `UPDATE rating_evaluations
+       SET zero_one_ppd_milli = 40000
+       WHERE source_match_id = ? AND source_revision = 1`,
+      match.matchId,
+    );
+
+    const repair = await service.ensureRatingEvaluationCurrent(match.matchId);
+    assert.equal(repair.recalculationRequired, true);
+    assert.ok(repair.evaluationId);
+
+    const latest = await db.getFirstAsync<{
+      source_revision: number;
+      zero_one_ppd_milli: number | null;
+    }>(
+      `SELECT source_revision, zero_one_ppd_milli
+       FROM rating_evaluations
+       WHERE source_match_id = ?
+       ORDER BY source_revision DESC
+       LIMIT 1`,
+      match.matchId,
+    );
+    assert.equal(latest?.source_revision, 2);
+    assert.equal(latest?.zero_one_ppd_milli, 13333);
+
+    const revisionOne = await db.getFirstAsync<{ zero_one_ppd_milli: number | null }>(
+      `SELECT zero_one_ppd_milli
+       FROM rating_evaluations
+       WHERE source_match_id = ? AND source_revision = 1`,
+      match.matchId,
+    );
+    assert.equal(revisionOne?.zero_one_ppd_milli, 40000);
+  } finally {
+    db.close();
+  }
+});
+
 test('MATCH 1-1 advances to CHOICE and GAME 3 zero-one keeps GAME 1 start score', async () => {
   const db = await createMigratedTestDatabase();
   try {
