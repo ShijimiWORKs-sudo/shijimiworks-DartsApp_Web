@@ -6,6 +6,8 @@ import { AppButton } from '../../../../components/AppButton';
 import { Card } from '../../../../components/Card';
 import { ScreenShell } from '../../../../components/ScreenShell';
 import { SectionTitle } from '../../../../components/SectionTitle';
+import { useDesktopWebLayout } from '../../../../components/web/useDesktopWebLayout';
+import { WebResponsiveGrid, webGameStyles } from '../../../../components/web/WebGameShell';
 import { colors } from '../../../../constants/theme';
 import { useGameDatabase } from '../../../../contexts/GameDatabaseContext';
 import type { ZeroOneGameState, ZeroOneResult } from '../../../../features/game/domain/zeroOne';
@@ -15,6 +17,7 @@ export default function ZeroOneResultScreen() {
   const params = useLocalSearchParams<{ gameId: string }>();
   const gameId = Array.isArray(params.gameId) ? params.gameId[0] : params.gameId;
   const { services } = useGameDatabase();
+  const isDesktopWeb = useDesktopWebLayout();
   const [game, setGame] = useState<ZeroOneGameState | null>(null);
 
   useFocusEffect(
@@ -57,60 +60,67 @@ export default function ZeroOneResultScreen() {
     <ScreenShell showNav={false}>
       <SectionTitle title="01 GAME結果" subtitle="DBへ保存された01集計結果です。" />
 
-      <Card muted>
-        <Text style={styles.remainingScore}>{result?.finalRemainingScore ?? '-'}</Text>
-        <Text style={styles.totalLabel}>FINAL REMAINING</Text>
-        <Text style={styles.reasonText}>{formatReason(result)}</Text>
-      </Card>
+      <WebResponsiveGrid>
+        <Card muted style={isDesktopWeb && webGameStyles.desktopGridCard}>
+          <Text style={styles.remainingScore}>{result?.finalRemainingScore ?? '-'}</Text>
+          <Text style={styles.totalLabel}>FINAL REMAINING</Text>
+          <Text style={styles.reasonText}>{formatReason(result)}</Text>
+        </Card>
 
-      <Card>
-        <SectionTitle title="スタッツ" tone="card" />
-        <View style={styles.statGrid}>
-          <ResultStat label="Start" value={result?.startScore ?? '-'} />
-          <ResultStat label="Effective" value={result?.effectiveScore ?? 0} />
-          <ResultStat label="Darts" value={result?.dartsThrown ?? 0} />
-          <ResultStat label="BUST" value={result?.bustCount ?? 0} />
-          <ResultStat label="PPD" value={formatMilli(result?.ppdMilli ?? 0)} />
-          <ResultStat label="3DA" value={formatMilli(result?.threeDartAverageMilli ?? 0)} />
-          <ResultStat label="Bull" value={result?.bullCount ?? 0} />
-          <ResultStat label="Triple" value={result?.tripleCount ?? 0} />
-          <ResultStat label="Double" value={result?.doubleCount ?? 0} />
-          <ResultStat label="Miss" value={result?.missCount ?? 0} />
-          <ResultStat label="100+" value={result?.turns100Plus ?? 0} />
-          <ResultStat label="180" value={result?.turns180 ?? 0} />
-        </View>
-      </Card>
+        <Card style={isDesktopWeb && webGameStyles.desktopGridCard}>
+          <SectionTitle title="スタッツ" tone="card" />
+          <View style={styles.statGrid}>
+            <ResultStat label="Start" value={result?.startScore ?? '-'} />
+            <ResultStat label="Effective" value={result?.effectiveScore ?? 0} />
+            <ResultStat label="Darts" value={result?.dartsThrown ?? 0} />
+            <ResultStat label="BUST" value={result?.bustCount ?? 0} />
+            <ResultStat label="PPD" value={formatMilli(result?.ppdMilli ?? 0)} />
+            <ResultStat label="3DA" value={formatMilli(result?.threeDartAverageMilli ?? 0)} />
+            <ResultStat label="Bull" value={result?.bullCount ?? 0} />
+            <ResultStat label="Triple" value={result?.tripleCount ?? 0} />
+            <ResultStat label="Double" value={result?.doubleCount ?? 0} />
+            <ResultStat label="Miss" value={result?.missCount ?? 0} />
+            <ResultStat label="100+" value={result?.turns100Plus ?? 0} />
+            <ResultStat label="180" value={result?.turns180 ?? 0} />
+          </View>
+        </Card>
 
-      <Card>
-        <SectionTitle title="01詳細" tone="card" />
-        <View style={styles.detailRows}>
-          <DetailRow
-            label="Out"
-            value={game?.outRule === 'master_out' ? 'Master Out' : 'Single Out'}
-          />
-          <DetailRow label="Bull" value={game?.bullRule ?? '-'} />
-          <DetailRow label="Checkout Round" value={result?.checkoutRoundNo ?? '-'} />
-          <DetailRow label="Checkout Darts" value={result?.checkoutDarts ?? '-'} />
-          <DetailRow label="140+" value={result?.turns140Plus ?? 0} />
-          <DetailRow
-            label="Outer / Inner Bull"
-            value={`${result?.outerBullCount ?? 0} / ${result?.innerBullCount ?? 0}`}
-          />
-        </View>
-      </Card>
+        <Card style={isDesktopWeb && webGameStyles.desktopGridCard}>
+          <SectionTitle title="01詳細" tone="card" />
+          <View style={styles.detailRows}>
+            <DetailRow
+              label="Out"
+              value={game?.outRule === 'master_out' ? 'Master Out' : 'Single Out'}
+            />
+            <DetailRow label="Bull" value={game?.bullRule ?? '-'} />
+            <DetailRow label="Checkout Round" value={result?.checkoutRoundNo ?? '-'} />
+            <DetailRow label="Checkout Darts" value={result?.checkoutDarts ?? '-'} />
+            <DetailRow label="140+" value={result?.turns140Plus ?? 0} />
+            <DetailRow
+              label="Outer / Inner Bull"
+              value={`${result?.outerBullCount ?? 0} / ${result?.innerBullCount ?? 0}`}
+            />
+          </View>
+        </Card>
 
-      <Card>
-        <SectionTitle title="連携状態" tone="card" />
-        <Text style={styles.outboxText}>{formatOutbox(result?.outboxStatus ?? null)}</Text>
-        <Text style={styles.ratingText}>単独01はRating計算の対象外として保存されています。</Text>
-      </Card>
+        <Card style={isDesktopWeb && webGameStyles.desktopGridCard}>
+          <SectionTitle title="連携状態" tone="card" />
+          <Text style={styles.outboxText}>{formatOutbox(result?.outboxStatus ?? null)}</Text>
+          <Text style={styles.ratingText}>単独01はRating計算の対象外として保存されています。</Text>
+        </Card>
+      </WebResponsiveGrid>
 
-      <View style={styles.actions}>
-        <AppButton label="もう一度01 GAME" onPress={() => router.replace('/game/01/settings')} />
+      <View style={[styles.actions, isDesktopWeb && webGameStyles.desktopFooterActions]}>
+        <AppButton
+          label="もう一度01 GAME"
+          onPress={() => router.replace('/game/01/settings')}
+          style={isDesktopWeb && webGameStyles.desktopFooterButton}
+        />
         <AppButton
           label="ゲーム一覧へ"
           onPress={() => router.replace('/game')}
           variant="secondary"
+          style={isDesktopWeb && webGameStyles.desktopFooterButton}
         />
       </View>
     </ScreenShell>

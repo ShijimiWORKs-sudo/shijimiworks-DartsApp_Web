@@ -4,8 +4,15 @@ import { Alert, BackHandler, Pressable, StyleSheet, Text, View } from 'react-nat
 
 import { AppButton } from '../../../../components/AppButton';
 import { Card } from '../../../../components/Card';
+import {
+  GameLeaveDialog,
+  type GameLeaveDialogStep,
+} from '../../../../components/game/GameLeaveDialog';
+import { useGameLeaveWebHistoryGuard } from '../../../../components/game/useGameLeaveWebHistoryGuard';
 import { ScreenShell } from '../../../../components/ScreenShell';
 import { SectionTitle } from '../../../../components/SectionTitle';
+import { useDesktopWebLayout } from '../../../../components/web/useDesktopWebLayout';
+import { WebGameShell, webGameStyles } from '../../../../components/web/WebGameShell';
 import { colors } from '../../../../constants/theme';
 import { useAppState } from '../../../../contexts/AppStateContext';
 import { useGameDatabase } from '../../../../contexts/GameDatabaseContext';
@@ -21,6 +28,7 @@ import type {
 import type { DartArea } from '../../../../features/game/domain/types';
 
 const segmentNumbers = [20, 19, 18, 17, 16, 15];
+const genericLeaveError = '操作を完了できませんでした。\n少し待ってからもう一度お試しください。';
 
 type BeforeRemoveEvent = {
   preventDefault: () => void;
@@ -37,11 +45,18 @@ export default function CricketPlayScreen() {
   const gameId = Array.isArray(params.gameId) ? params.gameId[0] : params.gameId;
   const { profile } = useAppState();
   const { services } = useGameDatabase();
+  const isDesktopWeb = useDesktopWebLayout();
   const [game, setGame] = useState<CricketGameState | null>(null);
   const [selectedSegment, setSelectedSegment] = useState(20);
   const [isBusy, setIsBusy] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
+  const [leaveDialogVisible, setLeaveDialogVisible] = useState(false);
+  const [leaveDialogInitialStep, setLeaveDialogInitialStep] =
+    useState<GameLeaveDialogStep>('leave');
+  const [leaveDialogError, setLeaveDialogError] = useState<string | null>(null);
+  const [isLeaveProcessing, setIsLeaveProcessing] = useState(false);
   const allowNavigationRef = useRef(false);
+  const leaveProcessingRef = useRef(false);
   const redoSessionRef = useRef(new CricketRedoSession());
 
   const activeDarts = useMemo(
@@ -63,6 +78,20 @@ export default function CricketPlayScreen() {
     allowNavigationRef.current = true;
     router.replace('/game');
   }, [clearRedoSession, router]);
+
+  const openLeaveDialog = useCallback((initialStep: GameLeaveDialogStep = 'leave') => {
+    setLeaveDialogInitialStep(initialStep);
+    setLeaveDialogError(null);
+    setLeaveDialogVisible(true);
+  }, []);
+
+  const closeLeaveDialog = useCallback(() => {
+    if (isLeaveProcessing) {
+      return;
+    }
+    setLeaveDialogVisible(false);
+    setLeaveDialogError(null);
+  }, [isLeaveProcessing]);
 
   const loadGame = useCallback(async () => {
     if (!services || !gameId) {
@@ -98,42 +127,14 @@ export default function CricketPlayScreen() {
       return;
     }
 
-    Alert.alert(
-      'CRICKETを離れますか？',
-      '進行中のゲームを保存して戻るか、途中終了として保存できます。',
-      [
-        {
-          text: '一時停止してゲームハブへ戻る',
-          onPress: () => {
-            void services.cricket
-              .pauseGame(game.gameId)
-              .then(navigateToGameHub)
-              .catch((error) => Alert.alert('操作できませんでした', getErrorMessage(error)));
-          },
-        },
-        { text: 'ゲームを続ける', style: 'cancel' },
-        {
-          text: '途中終了する',
-          style: 'destructive',
-          onPress: () => {
-            Alert.alert('ゲームを途中終了しますか？', 'CRICKETをabortedとして保存します。', [
-              { text: 'キャンセル', style: 'cancel' },
-              {
-                text: '途中終了する',
-                style: 'destructive',
-                onPress: () => {
-                  void services.cricket
-                    .abortGame(game.gameId)
-                    .then(navigateToGameHub)
-                    .catch((error) => Alert.alert('操作できませんでした', getErrorMessage(error)));
-                },
-              },
-            ]);
-          },
-        },
-      ],
-    );
-  }, [game, navigateToGameHub, services]);
+    openLeaveDialog('leave');
+  }, [game, navigateToGameHub, openLeaveDialog, services]);
+
+  useGameLeaveWebHistoryGuard({
+    isActive: game?.status === 'in_progress',
+    allowNavigationRef,
+    onRequestLeave: promptLeave,
+  });
 
   useFocusEffect(
     useCallback(() => {
@@ -215,25 +216,59 @@ export default function CricketPlayScreen() {
     [clearRedoSession, game, inputDisabled, runAction, services],
   );
 
+  const handlePauseAndLeave = useCallback(async () => {
+    if (!services || !game || leaveProcessingRef.current) {
+      return;
+    }
+
+    leaveProcessingRef.current = true;
+    setIsLeaveProcessing(true);
+    setLeaveDialogError(null);
+    try {
+      clearRedoSession();
+      await services.cricket.pauseGame(game.gameId);
+      allowNavigationRef.current = true;
+      setLeaveDialogVisible(false);
+      router.replace('/game');
+    } catch (error) {
+      console.warn('Failed to pause CRICKET before leaving.', error);
+      setLeaveDialogError(genericLeaveError);
+    } finally {
+      leaveProcessingRef.current = false;
+      setIsLeaveProcessing(false);
+    }
+  }, [clearRedoSession, game, router, services]);
+
+  const handleConfirmAbort = useCallback(async () => {
+    if (!services || !game || leaveProcessingRef.current) {
+      return;
+    }
+
+    leaveProcessingRef.current = true;
+    setIsLeaveProcessing(true);
+    setLeaveDialogError(null);
+    try {
+      clearRedoSession();
+      await services.cricket.abortGame(game.gameId);
+      allowNavigationRef.current = true;
+      setLeaveDialogVisible(false);
+      router.replace('/game');
+    } catch (error) {
+      console.warn('Failed to abort CRICKET before leaving.', error);
+      setLeaveDialogError(genericLeaveError);
+    } finally {
+      leaveProcessingRef.current = false;
+      setIsLeaveProcessing(false);
+    }
+  }, [clearRedoSession, game, router, services]);
+
   const handleAbort = useCallback(() => {
     if (!services || !game) {
       return;
     }
 
-    Alert.alert('ゲームを中断しますか？', '中断したCRICKETは結果として保存されません。', [
-      { text: 'キャンセル', style: 'cancel' },
-      {
-        text: '中断する',
-        style: 'destructive',
-        onPress: () => {
-          void runAction(async () => {
-            await services.cricket.abortGame(game.gameId);
-            navigateToGameHub();
-          });
-        },
-      },
-    ]);
-  }, [game, navigateToGameHub, runAction, services]);
+    openLeaveDialog('abort');
+  }, [game, openLeaveDialog, services]);
 
   if (!game) {
     return (
@@ -247,198 +282,240 @@ export default function CricketPlayScreen() {
   return (
     <ScreenShell showNav={false}>
       <Stack.Screen options={{ gestureEnabled: false }} />
-      <View style={styles.headerRow}>
-        <View style={styles.headerText}>
-          <Text style={styles.kicker}>STANDARD CRICKET</Text>
-          <Text style={styles.score}>{game.currentCricketScore}</Text>
-          <Text style={styles.meta}>
-            Round {game.currentRoundNo} / 15 ・ MPR {(game.mprMilli / 1000).toFixed(2)}
-          </Text>
-        </View>
-        <View style={styles.roundBadge}>
-          <Text style={styles.roundBadgeLabel}>MARKS</Text>
-          <Text style={styles.roundBadgeScore}>{game.currentTurnMarks}</Text>
-        </View>
-      </View>
-
-      {game.allClosedZeroScore ? (
-        <Card muted>
-          <SectionTitle
-            title="全ターゲットCLOSE済み"
-            subtitle="0点のためゲームは終了しません。1点以上を取るか15ラウンドまで続行します。"
-            tone="card"
-          />
-        </Card>
-      ) : null}
-
-      {game.status === 'paused' ? (
-        <Card muted>
-          <SectionTitle title="一時停止中" subtitle="再開すると入力できます。" tone="card" />
-          <View style={styles.cardActions}>
-            <AppButton
-              label="再開"
-              onPress={() => {
-                if (services) {
-                  void runAction(() => services.cricket.resumeGame(game.gameId));
-                }
-              }}
-            />
-          </View>
-        </Card>
-      ) : null}
-
-      <Card>
-        <SectionTitle title="ターゲット" tone="card" />
-        <View style={styles.targetGrid}>
-          {game.targetStates.map((state) => (
-            <TargetCell key={state.target} state={state} />
-          ))}
-        </View>
-      </Card>
-
-      <Card>
-        <SectionTitle
-          title="現在のターン"
-          subtitle={`このターン ${game.currentTurnMarks}マーク / ${game.currentTurnPoints}点`}
-          tone="card"
-        />
-        <View style={styles.dartRow}>
-          {[1, 2, 3].map((dartNo) => {
-            const dart = activeDarts[dartNo - 1];
-            return (
-              <View key={dartNo} style={styles.dartCell}>
-                <Text style={styles.dartNo}>D{dartNo}</Text>
-                <Text style={styles.dartScore}>{dart ? dart.cricketMarks : '-'}</Text>
-                <Text style={styles.dartMeta}>
-                  {dart ? formatDart(dart.area, dart.segmentNumber) : ''}
+      <WebGameShell
+        left={
+          <>
+            <View style={styles.headerRow}>
+              <View style={styles.headerText}>
+                <Text style={styles.kicker}>STANDARD CRICKET</Text>
+                <Text style={[styles.score, isDesktopWeb && styles.desktopScore]}>
+                  {game.currentCricketScore}
+                </Text>
+                <Text style={styles.meta}>
+                  Round {game.currentRoundNo} / 15 ・ MPR {(game.mprMilli / 1000).toFixed(2)}
                 </Text>
               </View>
-            );
-          })}
-        </View>
-        <View style={styles.cardActions}>
-          <AppButton
-            label="1投戻す"
-            onPress={() => {
-              if (services) {
-                const undoneDartId = activeDarts[activeDarts.length - 1]?.id ?? null;
-                void runAction(async () => {
-                  const nextGame = await services.cricket.undoDart(game.gameId);
-                  if (undoneDartId) {
-                    redoSessionRef.current.push(undoneDartId);
-                    syncRedoState();
-                  }
-                  return nextGame;
-                });
-              }
-            }}
-            variant="secondary"
-            disabled={isBusy || game.status !== 'in_progress' || activeDarts.length === 0}
-          />
-          <AppButton
-            label="やり直す"
-            onPress={() => {
-              if (services) {
-                const redoDartId = redoSessionRef.current.pop();
-                if (!redoDartId) {
-                  syncRedoState();
-                  return;
-                }
+              <View style={styles.roundBadge}>
+                <Text style={styles.roundBadgeLabel}>MARKS</Text>
+                <Text style={styles.roundBadgeScore}>{game.currentTurnMarks}</Text>
+              </View>
+            </View>
 
-                void runAction(async () => {
-                  const nextGame = await services.cricket.redoDart(game.gameId, redoDartId);
-                  syncRedoState();
-                  return nextGame;
-                });
-              }
-            }}
-            variant="secondary"
-            disabled={isBusy || game.status !== 'in_progress' || !canRedo}
-          />
-          <AppButton
-            label={game.currentRoundNo >= 15 ? 'ゲームを完了' : 'TURN終了'}
-            onPress={() => {
-              if (services) {
-                void runAction(async () => {
-                  const nextGame = await services.cricket.confirmTurn(game.gameId, {
-                    machineType: profile?.machineType ?? null,
-                  });
-                  clearRedoSession();
-                  return nextGame;
-                });
-              }
-            }}
-            disabled={isBusy || game.status !== 'in_progress' || activeDarts.length === 0}
-          />
-        </View>
-      </Card>
+            {game.allClosedZeroScore ? (
+              <Card muted>
+                <SectionTitle
+                  title="全ターゲットCLOSE済み"
+                  subtitle="0点のためゲームは終了しません。1点以上を取るか15ラウンドまで続行します。"
+                  tone="card"
+                />
+              </Card>
+            ) : null}
 
-      <Card>
-        <SectionTitle title="入力" subtitle="STANDARD CRICKET対象を入力します。" tone="card" />
-        <View style={styles.segmentGrid}>
-          {segmentNumbers.map((segment) => (
-            <Pressable
-              key={segment}
-              accessibilityRole="button"
-              onPress={() => setSelectedSegment(segment)}
-              style={({ pressed }) => [
-                styles.segmentButton,
-                selectedSegment === segment && styles.segmentSelected,
-                pressed && styles.pressed,
-              ]}
-            >
-              <Text
-                style={[
-                  styles.segmentText,
-                  selectedSegment === segment && styles.segmentTextSelected,
-                ]}
-              >
-                {segment}
-              </Text>
-            </Pressable>
-          ))}
-        </View>
-        <View style={styles.hitGrid}>
-          <AppButton
-            label="S"
-            onPress={() => recordDart('single', selectedSegment)}
-            disabled={inputDisabled}
-          />
-          <AppButton
-            label="D"
-            onPress={() => recordDart('double', selectedSegment)}
-            disabled={inputDisabled}
-          />
-          <AppButton
-            label="T"
-            onPress={() => recordDart('triple', selectedSegment)}
-            disabled={inputDisabled}
-          />
-          <AppButton
-            label="Outer Bull"
-            onPress={() => recordDart('outer_bull', null)}
-            disabled={inputDisabled}
-            variant="secondary"
-          />
-          <AppButton
-            label="Inner Bull"
-            onPress={() => recordDart('inner_bull', null)}
-            disabled={inputDisabled}
-            variant="secondary"
-          />
-          <AppButton
-            label="MISS"
-            onPress={() => recordDart('miss', null)}
-            disabled={inputDisabled}
-            variant="secondary"
-          />
-        </View>
-      </Card>
+            {game.status === 'paused' ? (
+              <Card muted>
+                <SectionTitle title="一時停止中" subtitle="再開すると入力できます。" tone="card" />
+                <View style={styles.cardActions}>
+                  <AppButton
+                    label="再開"
+                    onPress={() => {
+                      if (services) {
+                        void runAction(() => services.cricket.resumeGame(game.gameId));
+                      }
+                    }}
+                  />
+                </View>
+              </Card>
+            ) : null}
 
-      <View style={styles.footerActions}>
-        <AppButton label="ゲーム一覧へ" onPress={promptLeave} variant="secondary" />
-        <AppButton label="途中終了" onPress={handleAbort} variant="danger" />
-      </View>
+            <Card>
+              <SectionTitle title="ターゲット" tone="card" />
+              <View style={styles.targetGrid}>
+                {game.targetStates.map((state) => (
+                  <TargetCell key={state.target} state={state} />
+                ))}
+              </View>
+            </Card>
+
+            <Card>
+              <SectionTitle
+                title="現在のターン"
+                subtitle={`このターン ${game.currentTurnMarks}マーク / ${game.currentTurnPoints}点`}
+                tone="card"
+              />
+              <View style={styles.dartRow}>
+                {[1, 2, 3].map((dartNo) => {
+                  const dart = activeDarts[dartNo - 1];
+                  return (
+                    <View key={dartNo} style={styles.dartCell}>
+                      <Text style={styles.dartNo}>D{dartNo}</Text>
+                      <Text style={styles.dartScore}>{dart ? dart.cricketMarks : '-'}</Text>
+                      <Text style={styles.dartMeta}>
+                        {dart ? formatDart(dart.area, dart.segmentNumber) : ''}
+                      </Text>
+                    </View>
+                  );
+                })}
+              </View>
+              <View style={[styles.cardActions, isDesktopWeb && webGameStyles.desktopActionGrid]}>
+                <AppButton
+                  label="1投戻す"
+                  onPress={() => {
+                    if (services) {
+                      const undoneDartId = activeDarts[activeDarts.length - 1]?.id ?? null;
+                      void runAction(async () => {
+                        const nextGame = await services.cricket.undoDart(game.gameId);
+                        if (undoneDartId) {
+                          redoSessionRef.current.push(undoneDartId);
+                          syncRedoState();
+                        }
+                        return nextGame;
+                      });
+                    }
+                  }}
+                  variant="secondary"
+                  disabled={isBusy || game.status !== 'in_progress' || activeDarts.length === 0}
+                  style={isDesktopWeb && webGameStyles.desktopActionButton}
+                />
+                <AppButton
+                  label="やり直す"
+                  onPress={() => {
+                    if (services) {
+                      const redoDartId = redoSessionRef.current.pop();
+                      if (!redoDartId) {
+                        syncRedoState();
+                        return;
+                      }
+
+                      void runAction(async () => {
+                        const nextGame = await services.cricket.redoDart(game.gameId, redoDartId);
+                        syncRedoState();
+                        return nextGame;
+                      });
+                    }
+                  }}
+                  variant="secondary"
+                  disabled={isBusy || game.status !== 'in_progress' || !canRedo}
+                  style={isDesktopWeb && webGameStyles.desktopActionButton}
+                />
+                <AppButton
+                  label={game.currentRoundNo >= 15 ? 'ゲームを完了' : 'TURN終了'}
+                  onPress={() => {
+                    if (services) {
+                      void runAction(async () => {
+                        const nextGame = await services.cricket.confirmTurn(game.gameId, {
+                          machineType: profile?.machineType ?? null,
+                        });
+                        clearRedoSession();
+                        return nextGame;
+                      });
+                    }
+                  }}
+                  disabled={isBusy || game.status !== 'in_progress' || activeDarts.length === 0}
+                  style={isDesktopWeb && webGameStyles.desktopActionButton}
+                />
+              </View>
+            </Card>
+          </>
+        }
+        right={
+          <Card>
+            <SectionTitle title="入力" subtitle="STANDARD CRICKET対象を入力します。" tone="card" />
+            <View style={styles.segmentGrid}>
+              {segmentNumbers.map((segment) => (
+                <Pressable
+                  key={segment}
+                  accessibilityRole="button"
+                  onPress={() => setSelectedSegment(segment)}
+                  style={({ pressed }) => [
+                    styles.segmentButton,
+                    selectedSegment === segment && styles.segmentSelected,
+                    pressed && styles.pressed,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.segmentText,
+                      selectedSegment === segment && styles.segmentTextSelected,
+                    ]}
+                  >
+                    {segment}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+            <View style={[styles.hitGrid, isDesktopWeb && webGameStyles.desktopActionGrid]}>
+              <AppButton
+                label="S"
+                onPress={() => recordDart('single', selectedSegment)}
+                disabled={inputDisabled}
+                style={isDesktopWeb && webGameStyles.desktopActionButton}
+              />
+              <AppButton
+                label="D"
+                onPress={() => recordDart('double', selectedSegment)}
+                disabled={inputDisabled}
+                style={isDesktopWeb && webGameStyles.desktopActionButton}
+              />
+              <AppButton
+                label="T"
+                onPress={() => recordDart('triple', selectedSegment)}
+                disabled={inputDisabled}
+                style={isDesktopWeb && webGameStyles.desktopActionButton}
+              />
+              <AppButton
+                label="Outer Bull"
+                onPress={() => recordDart('outer_bull', null)}
+                disabled={inputDisabled}
+                variant="secondary"
+                style={isDesktopWeb && webGameStyles.desktopActionButton}
+              />
+              <AppButton
+                label="Inner Bull"
+                onPress={() => recordDart('inner_bull', null)}
+                disabled={inputDisabled}
+                variant="secondary"
+                style={isDesktopWeb && webGameStyles.desktopActionButton}
+              />
+              <AppButton
+                label="MISS"
+                onPress={() => recordDart('miss', null)}
+                disabled={inputDisabled}
+                variant="secondary"
+                style={isDesktopWeb && webGameStyles.desktopActionButton}
+              />
+            </View>
+          </Card>
+        }
+        footer={
+          <View style={[styles.footerActions, isDesktopWeb && webGameStyles.desktopFooterActions]}>
+            <AppButton
+              label="ゲーム一覧へ"
+              onPress={promptLeave}
+              variant="secondary"
+              disabled={isBusy || isLeaveProcessing}
+              style={isDesktopWeb && webGameStyles.desktopFooterButton}
+            />
+            <AppButton
+              label="途中終了"
+              onPress={handleAbort}
+              variant="danger"
+              disabled={isBusy || isLeaveProcessing}
+              style={isDesktopWeb && webGameStyles.desktopFooterButton}
+            />
+          </View>
+        }
+      />
+      <GameLeaveDialog
+        visible={leaveDialogVisible}
+        gameLabel="STANDARD CRICKET"
+        canPause={game.status === 'in_progress'}
+        isProcessing={isLeaveProcessing}
+        errorMessage={leaveDialogError}
+        initialStep={leaveDialogInitialStep}
+        onPauseAndLeave={() => void handlePauseAndLeave()}
+        onContinue={closeLeaveDialog}
+        onRequestAbort={() => void handleConfirmAbort()}
+      />
     </ScreenShell>
   );
 }
@@ -498,6 +575,9 @@ const styles = StyleSheet.create({
     color: colors.primaryDark,
     fontSize: 56,
     fontWeight: '900',
+  },
+  desktopScore: {
+    fontSize: 82,
   },
   meta: {
     color: colors.textMuted,

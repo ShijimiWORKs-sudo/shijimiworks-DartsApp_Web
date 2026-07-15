@@ -6,6 +6,8 @@ import { AppButton } from '../../../../components/AppButton';
 import { Card } from '../../../../components/Card';
 import { ScreenShell } from '../../../../components/ScreenShell';
 import { SectionTitle } from '../../../../components/SectionTitle';
+import { useDesktopWebLayout } from '../../../../components/web/useDesktopWebLayout';
+import { WebResponsiveGrid, webGameStyles } from '../../../../components/web/WebGameShell';
 import { colors } from '../../../../constants/theme';
 import { useGameDatabase } from '../../../../contexts/GameDatabaseContext';
 import type { MatchResultSummary, MatchState } from '../../../../features/game/domain/match';
@@ -15,6 +17,7 @@ export default function MatchResultScreen() {
   const params = useLocalSearchParams<{ matchId: string }>();
   const matchId = Array.isArray(params.matchId) ? params.matchId[0] : params.matchId;
   const { services } = useGameDatabase();
+  const isDesktopWeb = useDesktopWebLayout();
   const [match, setMatch] = useState<MatchState | null>(null);
 
   useFocusEffect(
@@ -52,55 +55,59 @@ export default function MatchResultScreen() {
     <ScreenShell showNav={false}>
       <SectionTitle title="MATCH結果" subtitle="2人対戦MATCHの結果と連携候補状態です。" />
 
-      <Card muted>
-        <Text style={styles.winner}>{getWinnerName(match)}</Text>
-        <Text style={styles.winnerLabel}>MATCH WINNER</Text>
-        <Text style={styles.reason}>{formatCompletionReason(match)}</Text>
-      </Card>
+      <WebResponsiveGrid>
+        <Card muted style={isDesktopWeb && webGameStyles.desktopGridCard}>
+          <Text style={styles.winner}>{getWinnerName(match)}</Text>
+          <Text style={styles.winnerLabel}>MATCH WINNER</Text>
+          <Text style={styles.reason}>{formatCompletionReason(match)}</Text>
+        </Card>
 
-      <Card>
-        <SectionTitle title="ゲーム勝敗" tone="card" />
-        <View style={styles.detailRows}>
-          {match?.players.map((player) => (
-            <DetailRow
-              key={player.playerId}
-              label={player.displayName}
-              value={`${result?.gamesWon[player.playerId] ?? player.gamesWon} win`}
-            />
-          ))}
-        </View>
-      </Card>
+        <Card style={isDesktopWeb && webGameStyles.desktopGridCard}>
+          <SectionTitle title="ゲーム勝敗" tone="card" />
+          <View style={styles.detailRows}>
+            {match?.players.map((player) => (
+              <DetailRow
+                key={player.playerId}
+                label={player.displayName}
+                value={`${result?.gamesWon[player.playerId] ?? player.gamesWon} win`}
+              />
+            ))}
+          </View>
+        </Card>
 
-      <Card>
-        <SectionTitle title="スタッツ" tone="card" />
-        <View style={styles.statGrid}>
-          <ResultStat label="Games" value={result?.gameIds.length ?? 0} />
-          <ResultStat label="Darts" value={result?.totalDarts ?? 0} />
-          <ResultStat label="01 PPD" value={formatMilli(result?.zeroOnePpdMilli)} />
-          <ResultStat label="CR MPR" value={formatMilli(result?.cricketMprMilli)} />
-          <ResultStat label="Bull" value={result?.bullCount ?? 0} />
-          <ResultStat label="Triple" value={result?.tripleCount ?? 0} />
-          <ResultStat label="Double" value={result?.doubleCount ?? 0} />
-          <ResultStat label="Bust" value={result?.bustCount ?? 0} />
-        </View>
-      </Card>
+        <Card style={isDesktopWeb && webGameStyles.desktopGridCard}>
+          <SectionTitle title="スタッツ" tone="card" />
+          <View style={styles.statGrid}>
+            <ResultStat label="Games" value={result?.gameIds.length ?? 0} />
+            <ResultStat label="Darts" value={result?.totalDarts ?? 0} />
+            <ResultStat label="01 PPD" value={formatMilli(result?.zeroOnePpdMilli)} />
+            <ResultStat label="CR MPR" value={formatMilli(result?.cricketMprMilli)} />
+            <ResultStat label="Bull" value={result?.bullCount ?? 0} />
+            <ResultStat label="Triple" value={result?.tripleCount ?? 0} />
+            <ResultStat label="Double" value={result?.doubleCount ?? 0} />
+            <ResultStat label="Bust" value={result?.bustCount ?? 0} />
+          </View>
+        </Card>
 
-      <Card>
-        <SectionTitle title="連携状態" tone="card" />
-        <Text style={styles.outboxText}>{formatRating(result)}</Text>
-        <Text style={styles.outboxText}>{formatOutbox(result)}</Text>
-      </Card>
+        <Card style={isDesktopWeb && webGameStyles.desktopGridCard}>
+          <SectionTitle title="連携状態" tone="card" />
+          <Text style={styles.outboxText}>{formatRating(result)}</Text>
+          <Text style={styles.outboxText}>{formatOutbox(result)}</Text>
+        </Card>
+      </WebResponsiveGrid>
 
-      <View style={styles.actions}>
+      <View style={[styles.actions, isDesktopWeb && webGameStyles.desktopFooterActions]}>
         <AppButton
           label="もう一度MATCH"
           onPress={() => router.replace('/game/match/settings')}
           variant="match"
+          style={isDesktopWeb && webGameStyles.desktopFooterButton}
         />
         <AppButton
           label="ゲーム一覧へ"
           onPress={() => router.replace('/game')}
           variant="secondary"
+          style={isDesktopWeb && webGameStyles.desktopFooterButton}
         />
       </View>
     </ScreenShell>

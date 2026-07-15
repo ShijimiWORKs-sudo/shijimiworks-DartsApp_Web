@@ -11,6 +11,12 @@ import { RoundIconButton } from '../components/RoundIconButton';
 import { ScreenShell } from '../components/ScreenShell';
 import { SectionTitle } from '../components/SectionTitle';
 import { StatCard } from '../components/StatCard';
+import {
+  DartsAppDesktopHome,
+  type DartsAppHomeActiveGame,
+  type DartsAppHomeRecentGame,
+} from '../components/web/DartsAppDesktopHome';
+import { useDesktopWebLayout } from '../components/web/useDesktopWebLayout';
 import { conditionLabels, gameLabels, machineLabels } from '../constants/labels';
 import { levelLabels } from '../constants/levels';
 import { colors } from '../constants/theme';
@@ -19,6 +25,7 @@ import { useGameDatabase } from '../contexts/GameDatabaseContext';
 import type { AccountOverview } from '../features/account/domain';
 import type { CountUpGameState } from '../features/game/domain/countUp';
 import type { CricketGameState } from '../features/game/domain/cricket';
+import type { MatchState } from '../features/game/domain/match';
 import type { ZeroOneGameState } from '../features/game/domain/zeroOne';
 import { calculateAnalysisSummary } from '../utils/analyzePracticeRecords';
 import { recommendPracticeMenus } from '../utils/recommendPracticeMenus';
@@ -40,12 +47,21 @@ const menuLinks = [
 type ActiveGame =
   | { mode: 'count_up'; game: CountUpGameState }
   | { mode: 'zero_one'; game: ZeroOneGameState }
-  | { mode: 'cricket'; game: CricketGameState };
+  | { mode: 'cricket'; game: CricketGameState }
+  | { mode: 'match'; match: MatchState };
+
+type RecentGame =
+  | { mode: 'count_up'; game: CountUpGameState }
+  | { mode: 'zero_one'; game: ZeroOneGameState }
+  | { mode: 'cricket'; game: CricketGameState }
+  | { mode: 'match'; match: MatchState };
 
 export default function HomeScreen() {
   const router = useRouter();
-  const { accountBootstrapStatus, services } = useGameDatabase();
+  const { accountBootstrapStatus, initializationError, isAvailable, services } = useGameDatabase();
+  const isDesktopWeb = useDesktopWebLayout();
   const [activeGame, setActiveGame] = useState<ActiveGame | null>(null);
+  const [recentResults, setRecentResults] = useState<RecentGame[]>([]);
   const [accountOverview, setAccountOverview] = useState<AccountOverview | null>(null);
   const {
     activeAccountId,
@@ -75,21 +91,49 @@ export default function HomeScreen() {
           return;
         }
 
-        const [countUp, zeroOne, cricket, account] = await Promise.all([
+        const [
+          countUp,
+          zeroOne,
+          cricket,
+          match,
+          recentCountUp,
+          recentZeroOne,
+          recentCricket,
+          recentMatch,
+          account,
+        ] = await Promise.all([
           services.countUp.getActiveGame(),
           services.zeroOne.getActiveGame(),
           services.cricket.getActiveGame(),
+          services.match.getActiveMatch(),
+          services.countUp.listRecentResults(3),
+          services.zeroOne.listRecentResults(3),
+          services.cricket.listRecentResults(3),
+          services.match.listRecentResults(3),
           services.account.getActiveAccount(activeAccountId),
         ]);
         if (mounted) {
           setActiveGame(
-            cricket
-              ? { mode: 'cricket', game: cricket }
-              : zeroOne
-                ? { mode: 'zero_one', game: zeroOne }
-                : countUp
-                  ? { mode: 'count_up', game: countUp }
-                  : null,
+            match
+              ? { mode: 'match', match }
+              : cricket
+                ? { mode: 'cricket', game: cricket }
+                : zeroOne
+                  ? { mode: 'zero_one', game: zeroOne }
+                  : countUp
+                    ? { mode: 'count_up', game: countUp }
+                    : null,
+          );
+          setRecentResults(
+            [
+              ...recentMatch.map((recentMatchState) => ({
+                mode: 'match' as const,
+                match: recentMatchState,
+              })),
+              ...recentCricket.map((game) => ({ mode: 'cricket' as const, game })),
+              ...recentZeroOne.map((game) => ({ mode: 'zero_one' as const, game })),
+              ...recentCountUp.map((game) => ({ mode: 'count_up' as const, game })),
+            ].slice(0, 5),
           );
           setAccountOverview(account);
         }
@@ -102,12 +146,27 @@ export default function HomeScreen() {
     }, [activeAccountId, services]),
   );
 
+  if (isDesktopWeb) {
+    return (
+      <ScreenShell>
+        <DartsAppDesktopHome
+          activeGame={activeGame as DartsAppHomeActiveGame | null}
+          recentResults={recentResults as DartsAppHomeRecentGame[]}
+          accountOverview={accountOverview}
+          accountBootstrapStatus={accountBootstrapStatus}
+          isDatabaseAvailable={isAvailable}
+          initializationError={initializationError}
+        />
+      </ScreenShell>
+    );
+  }
+
   return (
     <ScreenShell>
-      <View style={styles.header}>
+      <View style={[styles.header, isDesktopWeb && styles.desktopHeader]}>
         <Image source={logo} resizeMode="contain" style={styles.logo} />
         <View style={styles.headerText}>
-          <Text style={[styles.appName, { color: theme.onBackground }]}>DartsSupportApp</Text>
+          <Text style={[styles.appName, { color: theme.onBackground }]}>DartsApp</Text>
           <Text style={[styles.meta, { color: theme.onBackgroundMuted }]}>
             {profile ? levelLabels[profile.level] : 'プロフィール未設定'}
           </Text>
@@ -194,7 +253,7 @@ export default function HomeScreen() {
         </Pressable>
       ) : null}
 
-      <View style={styles.statsRow}>
+      <View style={[styles.statsRow, isDesktopWeb && styles.desktopStatsRow]}>
         <StatCard
           label="現在レーティング"
           value={profile ? `RT ${profile.rating}` : '-'}
@@ -309,7 +368,7 @@ export default function HomeScreen() {
       )}
 
       <SectionTitle title="主要メニュー" />
-      <View style={styles.menuGrid}>
+      <View style={[styles.menuGrid, isDesktopWeb && styles.desktopMenuGrid]}>
         {menuLinks.map((item) => (
           <Pressable
             key={item.href}
@@ -317,6 +376,7 @@ export default function HomeScreen() {
             onPress={() => router.push(item.href)}
             style={({ pressed }) => [
               styles.menuCard,
+              isDesktopWeb && styles.desktopMenuCard,
               { borderColor: theme.border, backgroundColor: theme.surface },
               pressed && styles.pressed,
             ]}
@@ -335,6 +395,9 @@ function trimSummary(text: string, maxLength: number) {
 }
 
 function getActiveRoute(active: ActiveGame) {
+  if (active.mode === 'match') {
+    return `/game/match/${active.match.matchId}`;
+  }
   if (active.mode === 'zero_one') {
     return `/game/01/${active.game.gameId}`;
   }
@@ -345,6 +408,9 @@ function getActiveRoute(active: ActiveGame) {
 }
 
 function getActiveTitle(active: ActiveGame) {
+  if (active.mode === 'match') {
+    return active.match.status === 'paused' ? 'MATCHを再開' : '進行中のMATCH';
+  }
   if (active.mode === 'zero_one') {
     return active.game.status === 'paused' ? '01 GAMEを再開' : '進行中の01 GAME';
   }
@@ -355,6 +421,17 @@ function getActiveTitle(active: ActiveGame) {
 }
 
 function getActiveSubtitle(active: ActiveGame) {
+  if (active.mode === 'match') {
+    const activeMatchGame = active.match.activeGame;
+    if (!activeMatchGame) {
+      return active.match.phase === 'choice_required'
+        ? 'GAME 3 CHOICE待ち'
+        : '次のGAMEを開始できます';
+    }
+    return `GAME ${activeMatchGame.gameNo} / Round ${activeMatchGame.currentRoundNo}、${active.match.players
+      .map((player) => `${player.displayName} ${player.gamesWon}`)
+      .join(' - ')}`;
+  }
   if (active.mode === 'zero_one') {
     return `Round ${active.game.currentRoundNo} / 15、残り ${active.game.currentRemainingScore} 点`;
   }
@@ -392,6 +469,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 14,
   },
+  desktopHeader: {
+    minHeight: 84,
+  },
   logo: {
     width: 64,
     height: 64,
@@ -413,6 +493,9 @@ const styles = StyleSheet.create({
   statsRow: {
     flexDirection: 'row',
     gap: 12,
+  },
+  desktopStatsRow: {
+    maxWidth: 720,
   },
   setupAction: {
     marginTop: 14,
@@ -514,6 +597,12 @@ const styles = StyleSheet.create({
   menuGrid: {
     gap: 10,
   },
+  desktopMenuGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'stretch',
+    gap: 12,
+  },
   menuCard: {
     minHeight: 72,
     justifyContent: 'center',
@@ -522,6 +611,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
     backgroundColor: colors.surface,
+  },
+  desktopMenuCard: {
+    width: '31%',
+    minWidth: 260,
   },
   menuTitle: {
     color: colors.text,

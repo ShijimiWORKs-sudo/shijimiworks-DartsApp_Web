@@ -6,6 +6,8 @@ import { AppButton } from '../../../../components/AppButton';
 import { Card } from '../../../../components/Card';
 import { ScreenShell } from '../../../../components/ScreenShell';
 import { SectionTitle } from '../../../../components/SectionTitle';
+import { useDesktopWebLayout } from '../../../../components/web/useDesktopWebLayout';
+import { WebResponsiveGrid, webGameStyles } from '../../../../components/web/WebGameShell';
 import { colors } from '../../../../constants/theme';
 import { useGameDatabase } from '../../../../contexts/GameDatabaseContext';
 import type { CricketGameState, CricketResult } from '../../../../features/game/domain/cricket';
@@ -15,6 +17,7 @@ export default function CricketResultScreen() {
   const params = useLocalSearchParams<{ gameId: string }>();
   const gameId = Array.isArray(params.gameId) ? params.gameId[0] : params.gameId;
   const { services } = useGameDatabase();
+  const isDesktopWeb = useDesktopWebLayout();
   const [game, setGame] = useState<CricketGameState | null>(null);
 
   useFocusEffect(
@@ -57,60 +60,64 @@ export default function CricketResultScreen() {
     <ScreenShell showNav={false}>
       <SectionTitle title="STANDARD CRICKET結果" subtitle="DBへ保存されたCRICKET集計結果です。" />
 
-      <Card muted>
-        <Text style={styles.totalScore}>{result?.finalCricketScore ?? '-'}</Text>
-        <Text style={styles.totalLabel}>FINAL CRICKET SCORE</Text>
-        <Text style={styles.reasonText}>{formatReason(result)}</Text>
-      </Card>
+      <WebResponsiveGrid>
+        <Card muted style={isDesktopWeb && webGameStyles.desktopGridCard}>
+          <Text style={styles.totalScore}>{result?.finalCricketScore ?? '-'}</Text>
+          <Text style={styles.totalLabel}>FINAL CRICKET SCORE</Text>
+          <Text style={styles.reasonText}>{formatReason(result)}</Text>
+        </Card>
 
-      <Card>
-        <SectionTitle title="スタッツ" tone="card" />
-        <View style={styles.statGrid}>
-          <ResultStat label="Marks" value={result?.marksTotal ?? 0} />
-          <ResultStat label="MPR" value={formatMilli(result?.mprMilli ?? 0)} />
-          <ResultStat label="Darts" value={result?.dartsThrown ?? 0} />
-          <ResultStat label="Rounds" value={result?.roundsPlayed ?? 0} />
-          <ResultStat label="Closed" value={`${result?.closedTargetCount ?? 0}/7`} />
-          <ResultStat label="Bull" value={result?.bullCount ?? 0} />
-          <ResultStat label="Triple" value={result?.tripleCount ?? 0} />
-          <ResultStat label="Double" value={result?.doubleCount ?? 0} />
-          <ResultStat label="Miss" value={result?.missCount ?? 0} />
-          <ResultStat label="5M+" value={result?.turns5MarksPlus ?? 0} />
-          <ResultStat label="7M+" value={result?.turns7MarksPlus ?? 0} />
-          <ResultStat label="9M" value={result?.turns9Marks ?? 0} />
-        </View>
-      </Card>
+        <Card style={isDesktopWeb && webGameStyles.desktopGridCard}>
+          <SectionTitle title="スタッツ" tone="card" />
+          <View style={styles.statGrid}>
+            <ResultStat label="Marks" value={result?.marksTotal ?? 0} />
+            <ResultStat label="MPR" value={formatMilli(result?.mprMilli ?? 0)} />
+            <ResultStat label="Darts" value={result?.dartsThrown ?? 0} />
+            <ResultStat label="Rounds" value={result?.roundsPlayed ?? 0} />
+            <ResultStat label="Closed" value={`${result?.closedTargetCount ?? 0}/7`} />
+            <ResultStat label="Bull" value={result?.bullCount ?? 0} />
+            <ResultStat label="Triple" value={result?.tripleCount ?? 0} />
+            <ResultStat label="Double" value={result?.doubleCount ?? 0} />
+            <ResultStat label="Miss" value={result?.missCount ?? 0} />
+            <ResultStat label="5M+" value={result?.turns5MarksPlus ?? 0} />
+            <ResultStat label="7M+" value={result?.turns7MarksPlus ?? 0} />
+            <ResultStat label="9M" value={result?.turns9Marks ?? 0} />
+          </View>
+        </Card>
 
-      <Card>
-        <SectionTitle title="ターゲット結果" tone="card" />
-        <View style={styles.detailRows}>
-          {(result?.targetStates ?? game?.targetStates ?? []).map((state) => (
-            <DetailRow
-              key={state.target}
-              label={state.target}
-              value={`${state.marksTotal} marks / ${state.pointsScored} pt`}
-            />
-          ))}
-        </View>
-      </Card>
+        <Card style={isDesktopWeb && webGameStyles.desktopGridCard}>
+          <SectionTitle title="ターゲット結果" tone="card" />
+          <View style={styles.detailRows}>
+            {(result?.targetStates ?? game?.targetStates ?? []).map((state) => (
+              <DetailRow
+                key={state.target}
+                label={state.target}
+                value={`${state.marksTotal} marks / ${state.pointsScored} pt`}
+              />
+            ))}
+          </View>
+        </Card>
 
-      <Card>
-        <SectionTitle title="連携状態" tone="card" />
-        <Text style={styles.outboxText}>{formatOutbox(result?.outboxStatus ?? null)}</Text>
-        <Text style={styles.ratingText}>
-          Rating計算本体は未実装です。対象条件を満たす単独CRICKETは候補として保存されます。
-        </Text>
-      </Card>
+        <Card style={isDesktopWeb && webGameStyles.desktopGridCard}>
+          <SectionTitle title="連携状態" tone="card" />
+          <Text style={styles.outboxText}>{formatOutbox(result?.outboxStatus ?? null)}</Text>
+          <Text style={styles.ratingText}>
+            Rating計算本体は未実装です。対象条件を満たす単独CRICKETは候補として保存されます。
+          </Text>
+        </Card>
+      </WebResponsiveGrid>
 
-      <View style={styles.actions}>
+      <View style={[styles.actions, isDesktopWeb && webGameStyles.desktopFooterActions]}>
         <AppButton
           label="もう一度CRICKET"
           onPress={() => router.replace('/game/cricket/settings')}
+          style={isDesktopWeb && webGameStyles.desktopFooterButton}
         />
         <AppButton
           label="ゲーム一覧へ"
           onPress={() => router.replace('/game')}
           variant="secondary"
+          style={isDesktopWeb && webGameStyles.desktopFooterButton}
         />
       </View>
     </ScreenShell>

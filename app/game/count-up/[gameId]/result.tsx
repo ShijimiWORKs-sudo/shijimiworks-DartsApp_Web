@@ -6,6 +6,8 @@ import { AppButton } from '../../../../components/AppButton';
 import { Card } from '../../../../components/Card';
 import { ScreenShell } from '../../../../components/ScreenShell';
 import { SectionTitle } from '../../../../components/SectionTitle';
+import { useDesktopWebLayout } from '../../../../components/web/useDesktopWebLayout';
+import { WebResponsiveGrid, webGameStyles } from '../../../../components/web/WebGameShell';
 import { colors } from '../../../../constants/theme';
 import { useGameDatabase } from '../../../../contexts/GameDatabaseContext';
 import type { CountUpGameState } from '../../../../features/game/domain/countUp';
@@ -15,6 +17,7 @@ export default function CountUpResultScreen() {
   const params = useLocalSearchParams<{ gameId: string }>();
   const gameId = Array.isArray(params.gameId) ? params.gameId[0] : params.gameId;
   const { services } = useGameDatabase();
+  const isDesktopWeb = useDesktopWebLayout();
   const [game, setGame] = useState<CountUpGameState | null>(null);
 
   useFocusEffect(
@@ -45,61 +48,65 @@ export default function CountUpResultScreen() {
     <ScreenShell showNav={false}>
       <SectionTitle title="COUNT-UP結果" subtitle="DBへ保存された集計結果です。" />
 
-      <Card muted>
-        <Text style={styles.totalScore}>{result?.totalScore ?? game?.totalScore ?? '-'}</Text>
-        <Text style={styles.totalLabel}>TOTAL SCORE</Text>
-      </Card>
+      <WebResponsiveGrid>
+        <Card muted style={isDesktopWeb && webGameStyles.desktopGridCard}>
+          <Text style={styles.totalScore}>{result?.totalScore ?? game?.totalScore ?? '-'}</Text>
+          <Text style={styles.totalLabel}>TOTAL SCORE</Text>
+        </Card>
 
-      <Card>
-        <SectionTitle title="スタッツ" tone="card" />
-        <View style={styles.statGrid}>
-          <ResultStat label="Bull" value={result?.bullCount ?? 0} />
-          <ResultStat label="Triple" value={result?.tripleCount ?? 0} />
-          <ResultStat label="Double" value={result?.doubleCount ?? 0} />
-          <ResultStat label="Miss" value={result?.missCount ?? 0} />
-          <ResultStat label="Round Avg" value={formatMilli(result?.roundAverageMilli ?? 0)} />
-          <ResultStat label="Dart Avg" value={formatMilli(result?.dartAverageMilli ?? 0)} />
-        </View>
-      </Card>
+        <Card style={isDesktopWeb && webGameStyles.desktopGridCard}>
+          <SectionTitle title="スタッツ" tone="card" />
+          <View style={styles.statGrid}>
+            <ResultStat label="Bull" value={result?.bullCount ?? 0} />
+            <ResultStat label="Triple" value={result?.tripleCount ?? 0} />
+            <ResultStat label="Double" value={result?.doubleCount ?? 0} />
+            <ResultStat label="Miss" value={result?.missCount ?? 0} />
+            <ResultStat label="Round Avg" value={formatMilli(result?.roundAverageMilli ?? 0)} />
+            <ResultStat label="Dart Avg" value={formatMilli(result?.dartAverageMilli ?? 0)} />
+          </View>
+        </Card>
 
-      <Card>
-        <SectionTitle title="ラウンド別" tone="card" />
-        <View style={styles.roundList}>
-          {(result?.roundScores ?? []).map((score, index) => (
-            <View key={`${index}-${score}`} style={styles.roundRow}>
-              <Text style={styles.roundLabel}>R{index + 1}</Text>
-              <View style={styles.roundBarTrack}>
-                <View style={[styles.roundBar, { flex: Math.max(score, 1) }]} />
-                <View style={{ flex: Math.max(180 - score, 1) }} />
+        <Card style={isDesktopWeb && webGameStyles.desktopGridCard}>
+          <SectionTitle title="ラウンド別" tone="card" />
+          <View style={styles.roundList}>
+            {(result?.roundScores ?? []).map((score, index) => (
+              <View key={`${index}-${score}`} style={styles.roundRow}>
+                <Text style={styles.roundLabel}>R{index + 1}</Text>
+                <View style={styles.roundBarTrack}>
+                  <View style={[styles.roundBar, { flex: Math.max(score, 1) }]} />
+                  <View style={{ flex: Math.max(180 - score, 1) }} />
+                </View>
+                <Text style={styles.roundScore}>{score}</Text>
               </View>
-              <Text style={styles.roundScore}>{score}</Text>
-            </View>
-          ))}
-        </View>
-      </Card>
+            ))}
+          </View>
+        </Card>
 
-      <Card>
-        <SectionTitle title="Practice連携" tone="card" />
-        <Text style={styles.outboxText}>
-          {game?.outboxStatus === 'pending'
-            ? 'OutboxにPracticeRecord upsert待ちとして保存済みです。'
-            : game?.outboxStatus === 'linked'
-              ? 'PracticeRecordへ連携済みです。'
-              : game?.outboxStatus === 'error'
-                ? 'PracticeRecord連携でエラーが発生しています。'
-                : 'Outbox状態を確認中です。'}
-        </Text>
-      </Card>
+        <Card style={isDesktopWeb && webGameStyles.desktopGridCard}>
+          <SectionTitle title="Practice連携" tone="card" />
+          <Text style={styles.outboxText}>
+            {game?.outboxStatus === 'pending'
+              ? 'OutboxにPracticeRecord upsert待ちとして保存済みです。'
+              : game?.outboxStatus === 'linked'
+                ? 'PracticeRecordへ連携済みです。'
+                : game?.outboxStatus === 'error'
+                  ? 'PracticeRecord連携でエラーが発生しています。'
+                  : 'Outbox状態を確認中です。'}
+          </Text>
+        </Card>
+      </WebResponsiveGrid>
 
-      <View style={styles.actions}>
+      <View style={[styles.actions, isDesktopWeb && webGameStyles.desktopFooterActions]}>
         <AppButton
           label="もう一度COUNT-UP"
           onPress={() => router.replace('/game/count-up/settings')}
+          style={isDesktopWeb && webGameStyles.desktopFooterButton}
         />
         <AppButton
           label="ゲーム一覧へ"
           onPress={() => router.replace('/game')}
           variant="secondary"
+          style={isDesktopWeb && webGameStyles.desktopFooterButton}
         />
       </View>
     </ScreenShell>

@@ -26,8 +26,9 @@ Expo Router のルート画面を配置します。
 
 - `AppButton`: 共通ボタン
 - `Card`: カード表示
-- `ScreenShell`: SafeArea + ScrollView + BottomNav
-- `BottomNav`: 主要5画面へのタブ導線
+- `ScreenShell`: SafeArea + ScrollView。PC WebではWebTopNavigationと幅制御、Expo Go/狭幅WebではBottomNavを使う
+- `BottomNav`: Expo Go/狭幅Web向けの主要5画面へのタブ導線
+- `components/web/*`: PC Web横長UI用のブレークポイント、WebTopNavigation、WebGameShell、レスポンシブグリッド
 - `PracticeMenuCard`: 練習メニューカード
 - `PracticeRecordForm`: 練習記録フォーム
 - `SimpleBarChart`: 軽量バーグラフ
@@ -85,6 +86,8 @@ Expo Router のルート画面を配置します。
 - `infrastructure/sqlite/`: DB初期化、migration、Repository実装、row mapper
 
 Phase 2ではCOUNT-UPの縦断実装を追加しています。Phase 3では単独01の縦断実装を追加します。Phase 5では単独STANDARD CRICKETの縦断実装を追加します。Phase 6では2人対戦MATCHの縦断実装を追加します。画面は `CountUpGameService`、`ZeroOneGameService`、`CricketGameService`、`MatchGameService` を通じてSQLiteへ保存し、既存AsyncStorageのPracticeRecordへは直接書き込みません。単独ゲーム完了時は `integration_outbox` と `practice_record_links` にpending状態を作り、後続フェーズの同期処理境界にします。MATCH完了時はOWNERのみのRating Evaluation候補、`rating_recalculate` Outbox、CommonEvent、`common_outbox(local_only)` を作成します。
+
+Phase 8ではゲームルール、DB、migrationを変更せず、PC Webだけに横長UIを追加します。1024px以上のWebではHOME / GAME / ACCOUNTのトップナビを使い、COUNT-UP、01、CRICKET、MATCHのプレイ画面はスコア/状態カラムと入力/操作カラムに分けます。Expo Goと1024px未満のWebでは既存の縦積みUIとBottomNavを維持します。
 
 SQLite DB:
 

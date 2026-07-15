@@ -1,17 +1,25 @@
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useState } from 'react';
-import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { AppButton } from '../../../components/AppButton';
 import { Card } from '../../../components/Card';
 import { AccountLocalNotice } from '../../../components/account/AccountLocalNotice';
+import { ActiveSessionConflictDialog } from '../../../components/game/ActiveSessionConflictDialog';
 import { ScreenShell } from '../../../components/ScreenShell';
 import { SectionTitle } from '../../../components/SectionTitle';
+import { useDesktopWebLayout } from '../../../components/web/useDesktopWebLayout';
+import {
+  WebGameSettingsShell,
+  webGameSettingsStyles,
+  WebSettingsSummaryCard,
+  WebSettingsSummaryRow,
+} from '../../../components/web/WebGameSettingsShell';
 import { colors } from '../../../constants/theme';
 import { useAppState } from '../../../contexts/AppStateContext';
 import { useGameDatabase } from '../../../contexts/GameDatabaseContext';
 import type { AccountOverview } from '../../../features/account/domain';
-import { ZeroOneActiveGameExistsError } from '../../../features/game/application/services';
+import type { ActiveSessionInfo } from '../../../features/game/application/services';
 import type { ZeroOneOutRule, ZeroOneStartScore } from '../../../features/game/domain/zeroOne';
 import type { BullRule } from '../../../features/game/domain/types';
 
@@ -28,15 +36,21 @@ const bullRuleOptions: { value: BullRule; label: string; helper: string }[] = [
   { value: 'fat_bull', label: 'Fat Bull', helper: 'Outer Bull / Inner Bull ともに50点' },
   { value: 'separate_bull', label: 'Separate Bull', helper: 'Outer Bull 25点、Inner Bull 50点' },
 ];
+const genericStartError =
+  'ゲームを開始できませんでした。進行中のゲームを確認して、もう一度お試しください。';
 
 export default function ZeroOneSettingsScreen() {
   const router = useRouter();
   const { activeAccountId, profile } = useAppState();
   const { services, isAvailable } = useGameDatabase();
+  const isDesktopWeb = useDesktopWebLayout();
   const [startScore, setStartScore] = useState<ZeroOneStartScore>(501);
   const [outRule, setOutRule] = useState<ZeroOneOutRule>('single_out');
   const [bullRule, setBullRule] = useState<BullRule>('fat_bull');
   const [accountOverview, setAccountOverview] = useState<AccountOverview | null>(null);
+  const [conflictSession, setConflictSession] = useState<ActiveSessionInfo | null>(null);
+  const [startError, setStartError] = useState<string | null>(null);
+  const [isConflictProcessing, setIsConflictProcessing] = useState(false);
   const [isStarting, setIsStarting] = useState(false);
 
   useFocusEffect(
@@ -78,6 +92,7 @@ export default function ZeroOneSettingsScreen() {
       bullRule,
       ownerName: profile ? `RT ${profile.rating}` : 'PLAYER 1',
     });
+    setStartError(null);
     router.replace(`/game/01/${game.gameId}`);
   }, [bullRule, outRule, profile, router, services, startScore]);
 
@@ -87,52 +102,163 @@ export default function ZeroOneSettingsScreen() {
     }
 
     setIsStarting(true);
+    setStartError(null);
     try {
-      await startZeroOne();
-    } catch (error) {
-      if (error instanceof ZeroOneActiveGameExistsError) {
-        const [activeZeroOne, activeCountUp] = await Promise.all([
-          services.zeroOne.getActiveGame(),
-          services.countUp.getActiveGame(),
-        ]);
-        const activeRoute = activeZeroOne
-          ? `/game/01/${activeZeroOne.gameId}`
-          : activeCountUp
-            ? `/game/count-up/${activeCountUp.gameId}`
-            : '/game';
-
-        Alert.alert('進行中のゲームがあります', '再開するか、途中終了して01設定を続けられます。', [
-          { text: 'キャンセル', style: 'cancel' },
-          {
-            text: '再開する',
-            onPress: () => router.replace(activeRoute),
-          },
-          {
-            text: '途中終了して新規設定へ',
-            style: 'destructive',
-            onPress: () => {
-              void (async () => {
-                try {
-                  if (activeZeroOne) {
-                    await services.zeroOne.abortGame(activeZeroOne.gameId);
-                  } else if (activeCountUp) {
-                    await services.countUp.abortGame(activeCountUp.gameId);
-                  }
-                  await startZeroOne();
-                } catch (nextError) {
-                  Alert.alert('01を開始できませんでした', getErrorMessage(nextError));
-                }
-              })();
-            },
-          },
-        ]);
+      const activeSession = await services.activeSession.findActiveSession();
+      if (activeSession) {
+        setConflictSession(activeSession);
         return;
       }
-      Alert.alert('01を開始できませんでした', getErrorMessage(error));
+      await startZeroOne();
+    } catch (error) {
+      console.warn('01 start failed', error);
+      setStartError(genericStartError);
     } finally {
       setIsStarting(false);
     }
-  }, [router, services, startZeroOne]);
+  }, [services, startZeroOne]);
+
+  const handleResumeConflict = useCallback(() => {
+    if (!conflictSession || isConflictProcessing) {
+      return;
+    }
+    setConflictSession(null);
+    router.replace(conflictSession.route);
+  }, [conflictSession, isConflictProcessing, router]);
+
+  const handleAbortConflictAndStart = useCallback(async () => {
+    if (!services || !conflictSession || isConflictProcessing) {
+      return;
+    }
+
+    setIsConflictProcessing(true);
+    setStartError(null);
+    try {
+      await services.activeSession.abortActiveSession(conflictSession);
+      setConflictSession(null);
+      await startZeroOne();
+    } catch (error) {
+      console.warn('01 conflict resolution failed', error);
+      setStartError(genericStartError);
+    } finally {
+      setIsConflictProcessing(false);
+      setIsStarting(false);
+    }
+  }, [conflictSession, isConflictProcessing, services, startZeroOne]);
+
+  const ratingStatus = accountOverview ? getZeroOneRatingStatus(accountOverview) : '対象外';
+
+  const conflictDialog = (
+    <ActiveSessionConflictDialog
+      visible={conflictSession !== null}
+      activeMode={conflictSession?.mode ?? 'zero_one'}
+      activeLabel={conflictSession?.label ?? '01 GAME'}
+      activeStatus={conflictSession?.status}
+      onResume={handleResumeConflict}
+      onAbortAndStart={() => void handleAbortConflictAndStart()}
+      onCancel={() => setConflictSession(null)}
+      isProcessing={isConflictProcessing}
+    />
+  );
+
+  const startScoreCard = (
+    <Card>
+      <SectionTitle title="開始点" subtitle="301 / 501 / 701 / 901から選択します。" tone="card" />
+      <View style={styles.segmented}>
+        {startScoreOptions.map((option) => (
+          <OptionButton
+            key={option}
+            label={`${option}`}
+            selected={option === startScore}
+            onPress={() => setStartScore(option)}
+          />
+        ))}
+      </View>
+    </Card>
+  );
+
+  const outRuleCard = (
+    <Card style={isDesktopWeb && webGameSettingsStyles.settingsGridCard}>
+      <SectionTitle title="Out" subtitle="DOUBLE OUTはPhase 3では扱いません。" tone="card" />
+      <View style={styles.optionList}>
+        {outRuleOptions.map((option) => (
+          <ChoiceRow
+            key={option.value}
+            label={option.label}
+            helper={option.helper}
+            selected={option.value === outRule}
+            onPress={() => setOutRule(option.value)}
+          />
+        ))}
+      </View>
+    </Card>
+  );
+
+  const bullRuleCard = (
+    <Card style={isDesktopWeb && webGameSettingsStyles.settingsGridCard}>
+      <SectionTitle title="Bull" subtitle="前回の01設定を初期値にします。" tone="card" />
+      <View style={styles.optionList}>
+        {bullRuleOptions.map((option) => (
+          <ChoiceRow
+            key={option.value}
+            label={option.label}
+            helper={option.helper}
+            selected={option.value === bullRule}
+            onPress={() => setBullRule(option.value)}
+          />
+        ))}
+      </View>
+    </Card>
+  );
+
+  if (isDesktopWeb) {
+    return (
+      <ScreenShell showNav={false}>
+        <SectionTitle title="01 GAME設定" subtitle="単独01をDBへ保存しながら開始します。" />
+        <WebGameSettingsShell
+          settings={
+            <View style={webGameSettingsStyles.settingsStack}>
+              {startScoreCard}
+              <View style={webGameSettingsStyles.settingsGrid}>
+                {outRuleCard}
+                {bullRuleCard}
+              </View>
+            </View>
+          }
+          summary={
+            <WebSettingsSummaryCard
+              title="01 GAME"
+              actions={
+                <>
+                  <AppButton
+                    label={isStarting ? '開始中...' : '01 GAME開始'}
+                    onPress={() => void handleStart()}
+                    disabled={!isAvailable || isStarting}
+                    variant="zeroOne"
+                    style={webGameSettingsStyles.summaryButton}
+                  />
+                  <AppButton
+                    label="戻る"
+                    onPress={() => router.replace('/game')}
+                    variant="secondary"
+                    style={webGameSettingsStyles.summaryButton}
+                  />
+                </>
+              }
+            >
+              <WebSettingsSummaryRow label="開始点" value={`${startScore}`} />
+              <WebSettingsSummaryRow label="Out" value={getOutRuleLabel(outRule)} />
+              <WebSettingsSummaryRow label="Bull" value={getBullRuleLabel(bullRule)} />
+              <WebSettingsSummaryRow label="最大ラウンド" value="15" />
+              <WebSettingsSummaryRow label="Rating" value={ratingStatus} />
+              {startError ? <Text style={styles.startError}>{startError}</Text> : null}
+            </WebSettingsSummaryCard>
+          }
+        />
+        {conflictDialog}
+      </ScreenShell>
+    );
+  }
 
   return (
     <ScreenShell showNav={false}>
@@ -160,49 +286,17 @@ export default function ZeroOneSettingsScreen() {
         </>
       )}
 
-      <Card>
-        <SectionTitle title="開始点" subtitle="301 / 501 / 701 / 901から選択します。" tone="card" />
-        <View style={styles.segmented}>
-          {startScoreOptions.map((option) => (
-            <OptionButton
-              key={option}
-              label={`${option}`}
-              selected={option === startScore}
-              onPress={() => setStartScore(option)}
-            />
-          ))}
-        </View>
-      </Card>
+      {startScoreCard}
 
-      <Card>
-        <SectionTitle title="Out設定" subtitle="DOUBLE OUTはPhase 3では扱いません。" tone="card" />
-        <View style={styles.optionList}>
-          {outRuleOptions.map((option) => (
-            <ChoiceRow
-              key={option.value}
-              label={option.label}
-              helper={option.helper}
-              selected={option.value === outRule}
-              onPress={() => setOutRule(option.value)}
-            />
-          ))}
-        </View>
-      </Card>
+      {outRuleCard}
 
-      <Card>
-        <SectionTitle title="Bull設定" subtitle="前回の01設定を初期値にします。" tone="card" />
-        <View style={styles.optionList}>
-          {bullRuleOptions.map((option) => (
-            <ChoiceRow
-              key={option.value}
-              label={option.label}
-              helper={option.helper}
-              selected={option.value === bullRule}
-              onPress={() => setBullRule(option.value)}
-            />
-          ))}
-        </View>
-      </Card>
+      {bullRuleCard}
+
+      {startError ? (
+        <Card muted>
+          <Text style={styles.startError}>{startError}</Text>
+        </Card>
+      ) : null}
 
       <View style={styles.actions}>
         <AppButton
@@ -212,6 +306,7 @@ export default function ZeroOneSettingsScreen() {
         />
         <AppButton label="戻る" onPress={() => router.replace('/game')} variant="secondary" />
       </View>
+      {conflictDialog}
     </ScreenShell>
   );
 }
@@ -269,8 +364,12 @@ function ChoiceRow({
   );
 }
 
-function getErrorMessage(error: unknown) {
-  return error instanceof Error ? error.message : '不明なエラーです。';
+function getOutRuleLabel(outRule: ZeroOneOutRule) {
+  return outRuleOptions.find((option) => option.value === outRule)?.label ?? outRule;
+}
+
+function getBullRuleLabel(bullRule: BullRule) {
+  return bullRuleOptions.find((option) => option.value === bullRule)?.label ?? bullRule;
 }
 
 const styles = StyleSheet.create({
@@ -328,6 +427,12 @@ const styles = StyleSheet.create({
   },
   actions: {
     gap: 10,
+  },
+  startError: {
+    color: colors.danger,
+    fontSize: 14,
+    fontWeight: '800',
+    lineHeight: 20,
   },
   ratingStatus: {
     marginTop: 12,

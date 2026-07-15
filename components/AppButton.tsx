@@ -1,3 +1,4 @@
+import type { StyleProp, ViewStyle } from 'react-native';
 import { Pressable, StyleSheet, Text } from 'react-native';
 
 import { useAppState } from '../contexts/AppStateContext';
@@ -10,6 +11,7 @@ type AppButtonProps = {
   variant?: AppButtonVariant;
   accessibilityLabel?: string;
   disabled?: boolean;
+  style?: StyleProp<ViewStyle>;
 };
 
 export function AppButton({
@@ -18,6 +20,7 @@ export function AppButton({
   variant = 'primary',
   accessibilityLabel,
   disabled = false,
+  style,
 }: AppButtonProps) {
   const { theme } = useAppState();
   const variantColors = resolveAppButtonVariantColors(variant, theme);
@@ -36,6 +39,7 @@ export function AppButton({
         variant === 'secondary' && {
           borderColor: variantColors.borderColor,
         },
+        style,
         disabled && styles.disabled,
         pressed && styles.pressed,
       ]}
