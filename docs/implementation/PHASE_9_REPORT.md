@@ -98,6 +98,8 @@ MATCH observation repair:
 - Completed MATCH result loading can re-sync game and match result stats from raw turn/dart rows
 - Legacy detection compares raw canonical turn/dart aggregation against `game_player_results`, `match_player_results`, latest `rating_evaluations`, and `rating_evaluation_games`
 - Stored `extra_stats_json.schemaVersion` alone is not trusted when deciding whether MATCH 01 PPD is current
+- Canonical completed-turn dart counts use `max(turns.dart_count, active dart rows)` so legacy rows with a missing final checkout dart can still restore Rating darts and MATCH total darts
+- When `turns.dart_count` is used because it exceeds active dart rows, `extra_stats_json` stores `legacyDartCountFallbackUsed` and per-turn fallback details for audit/debugging
 - If the stored Rating Evaluation no longer matches the canonical MATCH observation, a new `source_revision` is created
 - The new revision is passed to Rating recalculation so old Evaluations/Snapshots are invalidated and Profile is rebuilt from the latest valid Snapshot
 - Re-running the repair after canonical rows and latest Evaluation are aligned is idempotent and does not create another revision
@@ -174,6 +176,7 @@ Added coverage:
 - Natural 501 CHECKOUT in 9 darts stores `zero_one_ppd_milli = 55667` and `three_dart_average_milli = 167000`
 - Rating Index conversion clamps above-anchor PPD to Index 18 without clamping the raw stored PPD
 - Legacy MATCH repair rebuilds stale 60.00 PPD / 180.00 3DA summaries from raw 501-in-9 checkout turns, creates a new source revision, invalidates the old Snapshot, rebuilds Profile, and is idempotent on the second run
+- Legacy MATCH repair covers `turns.dart_count = 3` with only 2 active DART rows, restoring 501-in-9 PPD to `55667`, 3DA to `167000`, and MATCH total darts to 18 in the service-level fixture
 - MATCH result repair failures stay on the result screen with a generic retry message while logging the original error with `console.warn`
 
 Final test suite result during implementation:

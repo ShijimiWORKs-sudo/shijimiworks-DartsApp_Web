@@ -1469,6 +1469,8 @@ async function insertGamePlayerResults(
         completionReason,
         zeroOneRatingEffectiveScore: stats.zeroOneRatingEffectiveScore,
         zeroOneRatingDarts: stats.zeroOneRatingDarts,
+        legacyDartCountFallbackUsed: stats.legacyDartCountFallbackUsed,
+        legacyDartCountFallbacks: stats.legacyDartCountFallbacks,
       }),
       new Date().toISOString(),
       new Date().toISOString(),
@@ -1481,6 +1483,27 @@ async function getPlayerGameStats(db: GameDatabaseExecutor, gameId: string, game
     'SELECT mode FROM game_sessions WHERE id = ?',
     gameId,
   );
+  const turnDartCounts = await getCanonicalTurnDartCounts(db, gameId, gamePlayerId);
+  const canonicalDarts = turnDartCounts.reduce((sum, row) => sum + row.canonicalDarts, 0);
+  const legacyDartCountFallbacks = turnDartCounts
+    .filter((row) => row.legacyFallbackUsed || row.invalidPersistedDartCount)
+    .map((row) => ({
+      turnId: row.id,
+      roundNo: row.round_no,
+      turnSequenceNo: row.turn_sequence_no,
+      status: row.status,
+      persistedDartCount: row.persisted_dart_count,
+      activeDartRows: row.active_darts,
+      canonicalDarts: row.canonicalDarts,
+      invalidPersistedDartCount: row.invalidPersistedDartCount,
+    }));
+  if (legacyDartCountFallbacks.length > 0) {
+    console.warn('MATCH legacy dart count fallback used.', {
+      gameId,
+      gamePlayerId,
+      turns: legacyDartCountFallbacks,
+    });
+  }
   const turnRow = await db.getFirstAsync<{
     effectiveScore: number;
     rounds: number;
@@ -1527,7 +1550,7 @@ async function getPlayerGameStats(db: GameDatabaseExecutor, gameId: string, game
   const zeroOneRating =
     game?.mode === 'zero_one'
       ? await getZeroOneRatingTotalsForGamePlayer(db, gameId, gamePlayerId)
-      : { effectiveScore: 0, ratingDarts: 0 };
+      : { effectiveScore: 0, ratingDarts: 0, legacyDartCountFallbackUsed: false };
   const closed = await db.getFirstAsync<{ count: number }>(
     `SELECT COUNT(*) AS count FROM cricket_number_states WHERE game_id = ? AND game_player_id = ? AND is_closed = 1`,
     gameId,
@@ -1538,7 +1561,7 @@ async function getPlayerGameStats(db: GameDatabaseExecutor, gameId: string, game
     effectiveScore: turnRow?.effectiveScore ?? 0,
     rounds: turnRow?.rounds ?? 0,
     turns: turnRow?.turns ?? 0,
-    darts: row?.darts ?? 0,
+    darts: canonicalDarts,
     bull: row?.bull ?? 0,
     innerBull: row?.innerBull ?? 0,
     outerBull: row?.outerBull ?? 0,
@@ -1551,6 +1574,9 @@ async function getPlayerGameStats(db: GameDatabaseExecutor, gameId: string, game
     closed: closed?.count ?? 0,
     zeroOneRatingEffectiveScore: zeroOneRating.effectiveScore,
     zeroOneRatingDarts: zeroOneRating.ratingDarts,
+    legacyDartCountFallbackUsed:
+      legacyDartCountFallbacks.length > 0 || zeroOneRating.legacyDartCountFallbackUsed,
+    legacyDartCountFallbacks,
     ppdMilli:
       game?.mode === 'zero_one'
         ? calculatePpdMilli(zeroOneRating.effectiveScore, zeroOneRating.ratingDarts)
@@ -1566,20 +1592,34 @@ async function getPlayerGameStats(db: GameDatabaseExecutor, gameId: string, game
   };
 }
 
-async function getZeroOneRatingTotalsForGamePlayer(
+type CanonicalTurnDartCount = {
+  id: string;
+  round_no: number;
+  turn_sequence_no: number;
+  status: MatchTurn['status'] | 'voided' | 'invalid';
+  applied_score: number;
+  is_bust: number;
+  is_checkout: number;
+  persisted_dart_count: number;
+  active_darts: number;
+  canonicalDarts: number;
+  invalidPersistedDartCount: boolean;
+  legacyFallbackUsed: boolean;
+};
+
+async function getCanonicalTurnDartCounts(
   db: GameDatabaseExecutor,
   gameId: string,
   gamePlayerId: string,
-) {
-  const rows = await db.getAllAsync<{
-    status: MatchTurn['status'];
-    applied_score: number;
-    is_bust: number;
-    is_checkout: number;
-    active_darts: number;
-  }>(
-    `SELECT t.status, t.applied_score, t.is_bust, t.is_checkout,
-            COUNT(d.id) AS active_darts
+): Promise<CanonicalTurnDartCount[]> {
+  const rows = await db.getAllAsync<
+    Omit<
+      CanonicalTurnDartCount,
+      'canonicalDarts' | 'invalidPersistedDartCount' | 'legacyFallbackUsed'
+    >
+  >(
+    `SELECT t.id, t.round_no, t.turn_sequence_no, t.status, t.applied_score, t.is_bust,
+            t.is_checkout, t.dart_count AS persisted_dart_count, COUNT(d.id) AS active_darts
      FROM turns t
      LEFT JOIN darts d ON d.turn_id = t.id AND d.status = 'active'
      WHERE t.game_id = ? AND t.game_player_id = ?
@@ -1589,24 +1629,49 @@ async function getZeroOneRatingTotalsForGamePlayer(
     gamePlayerId,
   );
 
+  return rows.map((row) => {
+    const invalidPersistedDartCount = row.persisted_dart_count < 0 || row.persisted_dart_count > 3;
+    const validPersistedDartCount = invalidPersistedDartCount ? 0 : row.persisted_dart_count;
+    const countableTurn = !['in_progress', 'voided', 'invalid'].includes(row.status);
+    const canonicalDarts = countableTurn ? Math.max(validPersistedDartCount, row.active_darts) : 0;
+    return {
+      ...row,
+      canonicalDarts,
+      invalidPersistedDartCount,
+      legacyFallbackUsed: countableTurn && validPersistedDartCount > row.active_darts,
+    };
+  });
+}
+
+async function getZeroOneRatingTotalsForGamePlayer(
+  db: GameDatabaseExecutor,
+  gameId: string,
+  gamePlayerId: string,
+) {
+  const rows = await getCanonicalTurnDartCounts(db, gameId, gamePlayerId);
+
   return rows.reduce(
     (sum, row) => {
-      if (!['confirmed', 'bust', 'checkout'].includes(row.status) || row.active_darts === 0) {
+      if (!['confirmed', 'bust', 'checkout'].includes(row.status) || row.canonicalDarts === 0) {
         return sum;
       }
       const ratingDarts =
         row.is_bust === 1 || row.status === 'bust'
-          ? row.active_darts
+          ? row.canonicalDarts
           : row.is_checkout === 1 || row.status === 'checkout'
-            ? row.active_darts
+            ? row.canonicalDarts
             : 3;
       return {
         effectiveScore:
           sum.effectiveScore + (row.is_bust === 1 || row.status === 'bust' ? 0 : row.applied_score),
         ratingDarts: sum.ratingDarts + ratingDarts,
+        legacyDartCountFallbackUsed:
+          sum.legacyDartCountFallbackUsed ||
+          row.legacyFallbackUsed ||
+          row.invalidPersistedDartCount,
       };
     },
-    { effectiveScore: 0, ratingDarts: 0 },
+    { effectiveScore: 0, ratingDarts: 0, legacyDartCountFallbackUsed: false },
   );
 }
 
@@ -1840,10 +1905,13 @@ function gamePlayerResultMatchesCanonical(
   const cricketMatches =
     canonical.mode !== 'cricket' ||
     (row.mpr_milli === canonical.mprMilli && row.cricket_marks_total === canonical.marks);
+  const fallbackMatches =
+    Boolean(extra.legacyDartCountFallbackUsed) === canonical.legacyDartCountFallbackUsed;
 
   return (
     zeroOneMatches &&
     cricketMatches &&
+    fallbackMatches &&
     row.darts_thrown === canonical.darts &&
     row.rounds_count === canonical.rounds &&
     row.checkout_flag === canonical.checkout &&
@@ -1992,12 +2060,14 @@ function getStoredZeroOneRatingDarts(row: {
 function parseExtraStats(value: string | null): {
   zeroOneRatingEffectiveScore?: number;
   zeroOneRatingDarts?: number;
+  legacyDartCountFallbackUsed?: boolean;
 } {
   if (!value) return {};
   try {
     const parsed = JSON.parse(value) as {
       zeroOneRatingEffectiveScore?: unknown;
       zeroOneRatingDarts?: unknown;
+      legacyDartCountFallbackUsed?: unknown;
     };
     return {
       zeroOneRatingEffectiveScore:
@@ -2006,6 +2076,10 @@ function parseExtraStats(value: string | null): {
           : undefined,
       zeroOneRatingDarts:
         typeof parsed.zeroOneRatingDarts === 'number' ? parsed.zeroOneRatingDarts : undefined,
+      legacyDartCountFallbackUsed:
+        typeof parsed.legacyDartCountFallbackUsed === 'boolean'
+          ? parsed.legacyDartCountFallbackUsed
+          : undefined,
     };
   } catch {
     return {};

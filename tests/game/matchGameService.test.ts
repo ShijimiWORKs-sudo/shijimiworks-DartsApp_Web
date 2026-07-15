@@ -443,12 +443,148 @@ test('MATCH rating repair rebuilds legacy 60 PPD summaries from raw checkout tur
 
     assert.equal(match.activeGame, null);
     assert.equal(match.phase, 'next_game_available');
+    const checkoutTurnBeforeLegacy = await db.getFirstAsync<{
+      dart_count: number;
+      active_darts: number;
+    }>(
+      `SELECT t.dart_count, COUNT(d.id) AS active_darts
+       FROM turns t
+       LEFT JOIN darts d ON d.turn_id = t.id AND d.status = 'active'
+       WHERE t.game_id = ? AND t.is_checkout = 1
+       GROUP BY t.id
+       LIMIT 1`,
+      match.games[0]?.gameId,
+    );
+    assert.equal(checkoutTurnBeforeLegacy?.dart_count, 3);
+    assert.equal(checkoutTurnBeforeLegacy?.active_darts, 3);
+    const checkoutD12 = await db.getFirstAsync<{ id: string; status: string }>(
+      `SELECT id, status FROM darts WHERE client_action_id = ? LIMIT 1`,
+      'repair-checkout-final-d12',
+    );
+    assert.ok(checkoutD12?.id);
+    assert.equal(checkoutD12?.status, 'active');
 
     match = await service.startNextGame(match.matchId);
-    match = await service.completeCurrentGameByManualWinner(match.matchId, {
-      winnerPlayerId: ownerPlayerId,
-      reason: 'manual game two winner',
+
+    match = await service.recordDart(match.matchId, {
+      area: 'miss',
+      segmentNumber: null,
+      clientActionId: 'repair-cricket-guest-miss-1',
     });
+    match = await service.confirmTurn(match.matchId);
+
+    for (const [index, action] of (
+      [
+        ['triple', 20],
+        ['triple', 19],
+        ['triple', 18],
+      ] as const
+    ).entries()) {
+      match = await service.recordDart(match.matchId, {
+        area: action[0],
+        segmentNumber: action[1],
+        clientActionId: `repair-cricket-r1-${index}`,
+      });
+    }
+    match = await service.confirmTurn(match.matchId);
+
+    match = await service.recordDart(match.matchId, {
+      area: 'miss',
+      segmentNumber: null,
+      clientActionId: 'repair-cricket-guest-miss-2',
+    });
+    match = await service.confirmTurn(match.matchId);
+
+    for (const [index, action] of (
+      [
+        ['triple', 17],
+        ['triple', 16],
+        ['triple', 15],
+      ] as const
+    ).entries()) {
+      match = await service.recordDart(match.matchId, {
+        area: action[0],
+        segmentNumber: action[1],
+        clientActionId: `repair-cricket-r2-${index}`,
+      });
+    }
+    match = await service.confirmTurn(match.matchId);
+
+    match = await service.recordDart(match.matchId, {
+      area: 'miss',
+      segmentNumber: null,
+      clientActionId: 'repair-cricket-guest-miss-3',
+    });
+    match = await service.confirmTurn(match.matchId);
+
+    for (const [index, action] of (
+      [
+        ['inner_bull', null],
+        ['outer_bull', null],
+        ['single', 20],
+      ] as const
+    ).entries()) {
+      match = await service.recordDart(match.matchId, {
+        area: action[0],
+        segmentNumber: action[1],
+        clientActionId: `repair-cricket-r3-${index}`,
+      });
+    }
+
+    assert.equal(match.status, 'completed');
+    assert.equal(match.winnerPlayerId, ownerPlayerId);
+    const preLegacyMatch = await service.loadMatch(match.matchId);
+    assert.equal(preLegacyMatch.result?.totalDarts, 18);
+    assert.equal(preLegacyMatch.result?.zeroOnePpdMilli, 55667);
+    assert.equal(preLegacyMatch.result?.zeroOneThreeDartAverageMilli, 167000);
+    assert.equal(preLegacyMatch.result?.cricketMprMilli, 7333);
+
+    await db.runAsync(
+      `UPDATE darts SET status = 'invalidated' WHERE client_action_id = ?`,
+      'repair-checkout-final-d12',
+    );
+    const checkoutTurnAfterLegacy = await db.getFirstAsync<{
+      dart_count: number;
+      active_darts: number;
+    }>(
+      `SELECT t.dart_count, COUNT(d.id) AS active_darts
+       FROM turns t
+       LEFT JOIN darts d ON d.turn_id = t.id AND d.status = 'active'
+       WHERE t.game_id = ? AND t.is_checkout = 1
+       GROUP BY t.id
+       LIMIT 1`,
+      match.games[0]?.gameId,
+    );
+    assert.equal(checkoutTurnAfterLegacy?.dart_count, 3);
+    assert.equal(checkoutTurnAfterLegacy?.active_darts, 2);
+
+    await db.runAsync(
+      `UPDATE game_player_results
+       SET darts_thrown = 8
+       WHERE player_id = ?
+         AND game_id IN (
+           SELECT id FROM game_sessions WHERE match_id = ? AND mode = 'zero_one'
+         )`,
+      ownerPlayerId,
+      match.matchId,
+    );
+    await db.runAsync(
+      `UPDATE game_player_results
+       SET darts_thrown = 8
+       WHERE player_id = ?
+         AND game_id IN (
+           SELECT id FROM game_sessions WHERE match_id = ? AND mode = 'cricket'
+         )`,
+      ownerPlayerId,
+      match.matchId,
+    );
+    await db.runAsync(
+      `UPDATE match_player_results
+       SET total_darts = 16
+       WHERE match_id = ? AND player_id = ?`,
+      match.matchId,
+      ownerPlayerId,
+    );
 
     const ratingService = new RatingApplicationService(
       new SqliteRatingRepository(db),
@@ -471,7 +607,9 @@ test('MATCH rating repair rebuilds legacy 60 PPD summaries from raw checkout tur
 
     await db.runAsync(
       `UPDATE rating_evaluations
-       SET zero_one_ppd_milli = 60000
+       SET zero_one_ppd_milli = 60000,
+           total_darts = 16,
+           total_rounds = 16
        WHERE source_match_id = ? AND source_revision = 1`,
       match.matchId,
     );
@@ -486,6 +624,7 @@ test('MATCH rating repair rebuilds legacy 60 PPD summaries from raw checkout tur
       `UPDATE game_player_results
        SET ppd_milli = 60000,
            three_dart_average_milli = 180000,
+           darts_thrown = 8,
            extra_stats_json = ?
        WHERE player_id = ?
          AND game_id IN (
@@ -495,6 +634,7 @@ test('MATCH rating repair rebuilds legacy 60 PPD summaries from raw checkout tur
         schemaVersion: 3,
         zeroOneRatingEffectiveScore: 501,
         zeroOneRatingDarts: 6,
+        legacyDartCountFallbackUsed: false,
       }),
       ownerPlayerId,
       match.matchId,
@@ -502,7 +642,8 @@ test('MATCH rating repair rebuilds legacy 60 PPD summaries from raw checkout tur
     await db.runAsync(
       `UPDATE match_player_results
        SET zero_one_ppd_milli = 60000,
-           zero_one_three_dart_average_milli = 180000
+           zero_one_three_dart_average_milli = 180000,
+           total_darts = 16
        WHERE match_id = ? AND player_id = ?`,
       match.matchId,
       ownerPlayerId,
@@ -537,8 +678,9 @@ test('MATCH rating repair rebuilds legacy 60 PPD summaries from raw checkout tur
       ppd_milli: number | null;
       three_dart_average_milli: number | null;
       extra_stats_json: string;
+      darts_thrown: number;
     }>(
-      `SELECT r.ppd_milli, r.three_dart_average_milli, r.extra_stats_json
+      `SELECT r.ppd_milli, r.three_dart_average_milli, r.extra_stats_json, r.darts_thrown
        FROM game_player_results r
        JOIN game_sessions g ON g.id = r.game_id
        WHERE g.match_id = ? AND g.mode = 'zero_one' AND r.player_id = ?`,
@@ -547,13 +689,18 @@ test('MATCH rating repair rebuilds legacy 60 PPD summaries from raw checkout tur
     );
     assert.equal(fixedGameResult?.ppd_milli, 55667);
     assert.equal(fixedGameResult?.three_dart_average_milli, 167000);
+    assert.equal(fixedGameResult?.darts_thrown, 9);
     assert.match(fixedGameResult?.extra_stats_json ?? '', /"zeroOneRatingDarts":9/);
+    assert.match(fixedGameResult?.extra_stats_json ?? '', /"legacyDartCountFallbackUsed":true/);
+    assert.match(fixedGameResult?.extra_stats_json ?? '', /"persistedDartCount":3/);
+    assert.match(fixedGameResult?.extra_stats_json ?? '', /"activeDartRows":2/);
 
     const fixedMatchResult = await db.getFirstAsync<{
       zero_one_ppd_milli: number | null;
       zero_one_three_dart_average_milli: number | null;
+      total_darts: number;
     }>(
-      `SELECT zero_one_ppd_milli, zero_one_three_dart_average_milli
+      `SELECT zero_one_ppd_milli, zero_one_three_dart_average_milli, total_darts
        FROM match_player_results
        WHERE match_id = ? AND player_id = ?`,
       match.matchId,
@@ -561,18 +708,21 @@ test('MATCH rating repair rebuilds legacy 60 PPD summaries from raw checkout tur
     );
     assert.equal(fixedMatchResult?.zero_one_ppd_milli, 55667);
     assert.equal(fixedMatchResult?.zero_one_three_dart_average_milli, 167000);
+    assert.equal(fixedMatchResult?.total_darts, 18);
 
     const fixedEvaluationGame = await db.getFirstAsync<{
       ppd_milli: number | null;
       three_dart_average_milli: number | null;
+      darts_thrown: number;
     }>(
-      `SELECT g.ppd_milli, g.three_dart_average_milli
+      `SELECT g.ppd_milli, g.three_dart_average_milli, g.darts_thrown
        FROM rating_evaluation_games g
        WHERE g.evaluation_id = ? AND g.mode = 'zero_one'`,
       repair.evaluationId,
     );
     assert.equal(fixedEvaluationGame?.ppd_milli, 55667);
     assert.equal(fixedEvaluationGame?.three_dart_average_milli, 167000);
+    assert.equal(fixedEvaluationGame?.darts_thrown, 9);
 
     await ratingService.recalculateFromEvaluation(repair.evaluationId, '2026-07-15T01:05:00.000Z');
 
