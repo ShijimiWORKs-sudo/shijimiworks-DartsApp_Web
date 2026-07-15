@@ -1,5 +1,7 @@
+import { useRouter } from 'expo-router';
 import { StyleSheet, Text, View } from 'react-native';
 
+import { AppButton } from '../AppButton';
 import { Card } from '../Card';
 import { SectionTitle } from '../SectionTitle';
 import { colors } from '../../constants/theme';
@@ -18,6 +20,7 @@ type RatingStatusCardProps = {
 };
 
 export function RatingStatusCard({ overview }: RatingStatusCardProps) {
+  const router = useRouter();
   const profile = overview.ratingProfile;
   const standaloneEligible = profile.establishedAt !== null;
   const ratingLabel = formatRatingTenths(profile.ratingTenths);
@@ -58,6 +61,19 @@ export function RatingStatusCard({ overview }: RatingStatusCardProps) {
           ? '独自方式による参考値です。単独01とCRICKETは初回Rating確定後のゲームだけを更新対象にします。'
           : '単独01・CRICKETは初回3MATCH確定後のゲームからRating対象になります。'}
       </Text>
+
+      <View style={styles.actions}>
+        <AppButton
+          label="Rating詳細を見る"
+          onPress={() => router.push('/account/rating')}
+          variant="secondary"
+        />
+        <AppButton
+          label="Rating履歴を見る"
+          onPress={() => router.push('/account/rating/history')}
+          variant="secondary"
+        />
+      </View>
     </Card>
   );
 }
@@ -119,5 +135,9 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     fontSize: 13,
     lineHeight: 20,
+  },
+  actions: {
+    gap: 10,
+    marginTop: 14,
   },
 });

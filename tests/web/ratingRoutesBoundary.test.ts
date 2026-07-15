@@ -1,0 +1,55 @@
+import assert from 'node:assert/strict';
+import { existsSync, readFileSync } from 'node:fs';
+import path from 'node:path';
+import { test } from 'node:test';
+
+const rootDir = path.resolve(__dirname, '..', '..');
+
+function readText(relativePath: string): string {
+  return readFileSync(path.join(rootDir, relativePath), 'utf8');
+}
+
+test('Rating detail and history routes are present', () => {
+  assert.equal(existsSync(path.join(rootDir, 'app/account/rating/index.tsx')), true);
+  assert.equal(existsSync(path.join(rootDir, 'app/account/rating/history.tsx')), true);
+
+  const detail = readText('app/account/rating/index.tsx');
+  const history = readText('app/account/rating/history.tsx');
+
+  assert.match(detail, /DartsApp Rating/);
+  assert.match(detail, /Rating履歴を見る/);
+  assert.match(history, /Rating履歴/);
+  assert.match(history, /listSnapshots/);
+});
+
+test('Rating detail links are available from Home, Game Hub and Account screens', () => {
+  const desktopHome = readText('components/web/DartsAppDesktopHome.tsx');
+  const ratingStatusCard = readText('components/account/RatingStatusCard.tsx');
+  const profile = readText('app/account/profile.tsx');
+
+  assert.match(desktopHome, /Rating詳細を見る/);
+  assert.match(desktopHome, /\/account\/rating/);
+  assert.match(ratingStatusCard, /Rating詳細を見る/);
+  assert.match(ratingStatusCard, /Rating履歴を見る/);
+  assert.match(profile, /RatingStatusCard/);
+});
+
+test('game result screens use source Rating results instead of only profile state', () => {
+  for (const routeFile of [
+    'app/game/01/[gameId]/result.tsx',
+    'app/game/cricket/[gameId]/result.tsx',
+    'app/game/match/[matchId]/result.tsx',
+  ]) {
+    const source = readText(routeFile);
+    assert.match(source, /RatingResultCard/, routeFile);
+    assert.match(source, /getRatingResultForSource/, routeFile);
+  }
+
+  const countUp = readText('app/game/count-up/[gameId]/result.tsx');
+  assert.match(countUp, /RatingResultCard/);
+  assert.match(countUp, /countUp/);
+  assert.match(
+    readText('components/game/RatingResultCard.tsx'),
+    /COUNT-UPはRating計算には使用されません/,
+  );
+});

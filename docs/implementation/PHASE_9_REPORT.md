@@ -17,6 +17,12 @@ Implemented:
 - `rating_recalculate` Outbox completion after successful apply/exclusion
 - Account-level pending processing mutex
 - Pending processing on DB startup, Home focus, Game Hub focus, and Rating status focus
+- PC Home Rating card Confidence display
+- `/account/rating` Rating detail route
+- `/account/rating/history` Rating Snapshot history route
+- 01 / STANDARD CRICKET / MATCH result screen Rating result display based on Evaluation and Snapshot
+- COUNT-UP result screen Rating対象外 display
+- Source revision recalculation with Evaluation invalidation, Snapshot invalidation, chronological replay, and Profile restoration
 
 Not implemented in this phase:
 
@@ -25,7 +31,6 @@ Not implemented in this phase:
 - Sound effects
 - Award videos
 - Camera or realtime scoring
-- Dedicated Rating history route
 
 ## Rating Specification
 
@@ -72,9 +77,19 @@ Transactional apply order:
 8. Update Profile
 9. Complete `rating_recalculate` Outbox
 
+Source revision recalculation:
+
+1. Select the latest Evaluation revision for the same source
+2. Invalidate older Evaluation revisions
+3. Invalidate valid Snapshots from the source timestamp onward
+4. Restore Rating Profile from the previous valid Snapshot, or clear it to unmeasured before replay
+5. Replay latest Evaluation revisions chronologically
+6. Keep invalidated Snapshot rows as history while freeing the Evaluation unique key for replayed Snapshots
+7. Align Rating Profile with the final replayed Snapshot
+
 ## UI
 
-`/account/rating-status`, Home, and Game Hub now display updated Rating Profile values after pending processing:
+`/account/rating-status`, `/account/rating`, `/account/rating/history`, Home, and Game Hub now display updated Rating Profile values after pending processing:
 
 - DartsApp Rating
 - Confidence
@@ -85,6 +100,13 @@ Transactional apply order:
 - Cricket Index
 - Match Index
 - Last evaluated datetime
+
+Game result screens now display Rating result status by source Evaluation:
+
+- 01 result: applied / excluded / processing / not_target
+- STANDARD CRICKET result: applied / excluded / processing / not_target
+- MATCH result: applied / excluded / processing / not_target
+- COUNT-UP result: always Rating対象外
 
 ## Tests
 
@@ -100,7 +122,15 @@ Added coverage:
 - `rating_recalculate` Outbox completes
 - standalone 01 keeps Cricket/Match Index unchanged
 - GUEST/owner mismatch excludes without Snapshot
+- HOME Rating card Confidence and updated local Rating text
+- Rating detail and history route presence
+- Result screens use source Rating results
+- Snapshot history lists latest valid rows
+- Source result lookup returns applied and not_target
+- Source revision recalculation invalidates older revisions and Snapshots
+- Recalculation replays latest Evaluations and keeps Profile aligned with the final Snapshot
+- Candidate-disabled latest revision is excluded and remaining sources are replayed
 
 Final test suite result during implementation:
 
-- `npm.cmd test`: 252 passed
+- `npm.cmd test`: 259 passed

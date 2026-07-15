@@ -197,6 +197,8 @@ Phase 9ではRating候補判定に加え、DartsApp独自Rating Engine v2を実�
 - 単独01は01 Indexのみ、単独CRICKETはCricket Indexのみを更新し、単独1件の総合Rating変動は±0.2以内に制限する
 - 初回確定前の単独ゲームは遡及利用しない
 - GUESTにはRating Profile、Evaluation、Snapshotを作らない
+- source revision再計算では古いEvaluation revisionと対象時点以降のSnapshotを無効化し、最新Evaluationを時系列にReplayしてProfileを最終Snapshotへ揃える
+- `/account/rating` は現在値、`/account/rating/history` は有効Snapshot履歴、各ゲーム結果画面はsource Evaluation/Snapshotに基づくRating結果を表示する
 
 `rating_evaluations` は `source_type = match | standalone_zero_one | standalone_cricket` を保持します。単独ゲームは `source_weight_milli = 500`、MATCHは `1000` です。
 

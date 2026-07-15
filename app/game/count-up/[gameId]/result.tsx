@@ -4,6 +4,7 @@ import { StyleSheet, Text, View } from 'react-native';
 
 import { AppButton } from '../../../../components/AppButton';
 import { Card } from '../../../../components/Card';
+import { RatingResultCard } from '../../../../components/game/RatingResultCard';
 import { ScreenShell } from '../../../../components/ScreenShell';
 import { SectionTitle } from '../../../../components/SectionTitle';
 import { useDesktopWebLayout } from '../../../../components/web/useDesktopWebLayout';
@@ -94,6 +95,8 @@ export default function CountUpResultScreen() {
                   : 'Outbox状態を確認中です。'}
           </Text>
         </Card>
+
+        <RatingResultCard result={null} countUp />
       </WebResponsiveGrid>
 
       <View style={[styles.actions, isDesktopWeb && webGameStyles.desktopFooterActions]}>

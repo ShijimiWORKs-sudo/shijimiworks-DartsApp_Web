@@ -278,6 +278,8 @@ Account / Rating:
 - `/account/register` で端末内ローカルAccountを登録
 - `/account/profile` でAccount状態、OWNER紐付け、Rating状態、共通Account IDを表示
 - `/account/rating-status` でDartsApp Rating、Confidence、Eligible MATCH件数、単独対象件数、01/Cricket/Match Index、最終評価日時を表示
+- `/account/rating` で現在のRating詳細、`/account/rating/history` で有効なRating Snapshot履歴を表示
+- 01、STANDARD CRICKET、MATCHの結果画面で、対象EvaluationとSnapshotに基づくRating結果を表示
 - Account登録はゲーム開始の必須条件ではありません
 - GUESTには正式Rating Profile、Rating Evaluation、Rating Snapshotを作成しません
 - COUNT-UPは常にRating対象外です
@@ -285,6 +287,7 @@ Account / Rating:
 - 初回確定前の単独01/CRICKETは遡及利用せず、確定後の単独01は01 Indexだけ、単独CRICKETはCricket Indexだけを更新します
 - 単独ゲーム1件の総合Rating変動は最大±0.2に制限し、Match Indexは単独ゲームで変更しません
 - Evaluation、Snapshot、Profile、`rating_recalculate` Outbox更新は同一transactionで処理します
+- source revision再計算では古いEvaluation/Snapshotを無効化し、最新Evaluationを時系列にReplayしてProfileを最終Snapshotへ揃えます
 - GUESTには正式Rating Profile、Rating Evaluation、Rating Snapshotを作成しません
 
 共通Account契約:
@@ -297,7 +300,7 @@ Account / Rating:
 - 現段階のOutbox状態は `local_only` で、DartsSupportApp通信、API通信、クラウド同期は実装しません
 - Importはcontract名、version、UUID、payloadの検証と件数プレビューだけを行い、既存DBを無条件上書きしません
 
-Rating履歴の専用画面、効果音・アワード動画は次フェーズ以降で実装します。
+効果音・アワード動画は次フェーズ以降で実装します。
 
 ## App identity
 

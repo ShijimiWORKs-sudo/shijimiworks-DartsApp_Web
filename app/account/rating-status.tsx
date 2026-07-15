@@ -101,8 +101,7 @@ export default function AccountRatingStatusScreen() {
           <AccountSummaryCard overview={overview} />
           <Card muted>
             <Text style={styles.message}>
-              Phase
-              4ではRating計算本体とSnapshot更新は行いません。対象候補の判定と保存基盤だけを扱います。
+              Ratingは端末内で計算・保存されます。履歴では有効なSnapshotを新しい順に確認できます。
             </Text>
           </Card>
         </>

@@ -4,6 +4,7 @@ import { StyleSheet, Text, View } from 'react-native';
 
 import { AppButton } from '../../../../components/AppButton';
 import { Card } from '../../../../components/Card';
+import { RatingResultCard } from '../../../../components/game/RatingResultCard';
 import { ScreenShell } from '../../../../components/ScreenShell';
 import { SectionTitle } from '../../../../components/SectionTitle';
 import { useDesktopWebLayout } from '../../../../components/web/useDesktopWebLayout';
@@ -11,6 +12,7 @@ import { WebResponsiveGrid, webGameStyles } from '../../../../components/web/Web
 import { colors } from '../../../../constants/theme';
 import { useGameDatabase } from '../../../../contexts/GameDatabaseContext';
 import type { MatchResultSummary, MatchState } from '../../../../features/game/domain/match';
+import type { RatingSourceResult } from '../../../../features/game/application/ports';
 
 export default function MatchResultScreen() {
   const router = useRouter();
@@ -19,6 +21,7 @@ export default function MatchResultScreen() {
   const { services } = useGameDatabase();
   const isDesktopWeb = useDesktopWebLayout();
   const [match, setMatch] = useState<MatchState | null>(null);
+  const [ratingResult, setRatingResult] = useState<RatingSourceResult | null>(null);
 
   useFocusEffect(
     useCallback(() => {
@@ -37,6 +40,13 @@ export default function MatchResultScreen() {
             return;
           }
           if (mounted) setMatch(nextMatch);
+          await services.rating.processPending();
+          const nextRatingResult = await services.rating.getRatingResultForSource({
+            sourceMatchId: nextMatch.matchId,
+          });
+          if (mounted) {
+            setRatingResult(nextRatingResult);
+          }
         } catch {
           router.replace('/game');
         }
@@ -94,6 +104,8 @@ export default function MatchResultScreen() {
           <Text style={styles.outboxText}>{formatRating(result)}</Text>
           <Text style={styles.outboxText}>{formatOutbox(result)}</Text>
         </Card>
+
+        <RatingResultCard result={ratingResult} />
       </WebResponsiveGrid>
 
       <View style={[styles.actions, isDesktopWeb && webGameStyles.desktopFooterActions]}>

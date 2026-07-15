@@ -1,5 +1,13 @@
-import type { RatingEvaluationApplyResult, RatingRepository } from '../ports';
+import type {
+  RatingEvaluationApplyResult,
+  RatingRecalculationResult,
+  RatingRepository,
+  RatingSnapshotHistoryItem,
+  RatingSourceLookup,
+  RatingSourceResult,
+} from '../ports';
 import { calculateRatingUpdate } from '../../domain/rating';
+import { RatingRecalculationService } from './RatingRecalculationService';
 
 export type RatingApplicationServicePort = {
   applyEvaluation(
@@ -10,6 +18,12 @@ export type RatingApplicationServicePort = {
     limit?: number;
     calculationDateTime?: string;
   }): Promise<RatingEvaluationApplyResult[]>;
+  listSnapshots(accountId: string): Promise<RatingSnapshotHistoryItem[]>;
+  getRatingResultForSource(input: RatingSourceLookup): Promise<RatingSourceResult>;
+  recalculateFromEvaluation(
+    evaluationId: string,
+    calculationDateTime?: string,
+  ): Promise<RatingRecalculationResult>;
 };
 
 type RatingClock = () => string;
@@ -43,6 +57,24 @@ export class RatingApplicationService implements RatingApplicationServicePort {
     }
 
     return results;
+  }
+
+  async listSnapshots(accountId: string): Promise<RatingSnapshotHistoryItem[]> {
+    return this.repository.listSnapshots(accountId);
+  }
+
+  async getRatingResultForSource(input: RatingSourceLookup): Promise<RatingSourceResult> {
+    return this.repository.getRatingResultForSource(input);
+  }
+
+  async recalculateFromEvaluation(
+    evaluationId: string,
+    calculationDateTime = this.clock(),
+  ): Promise<RatingRecalculationResult> {
+    return new RatingRecalculationService(this.repository, this.clock).recalculateFromEvaluation(
+      evaluationId,
+      calculationDateTime,
+    );
   }
 
   private async runForAccount<T>(accountId: string, task: () => Promise<T>): Promise<T> {

@@ -52,7 +52,7 @@ export function formatRatingIndex(indexMilli: number | null) {
 }
 
 export function formatConfidence(confidenceBp: number) {
-  return `${(confidenceBp / 100).toFixed(0)}%`;
+  return `${(confidenceBp / 100).toFixed(1)}%`;
 }
 
 export function formatEvaluatedAt(value: string | null) {

@@ -36,8 +36,20 @@ test('desktop Web Home keeps Account compact and DartsApp Rating scoped', () => 
   assert.match(desktopHome, /表示名/);
   assert.match(desktopHome, /状態/);
   assert.match(desktopHome, /Eligible MATCH/);
+  assert.match(desktopHome, /Confidence/);
+  assert.match(desktopHome, /0\.0%/);
   assert.match(desktopHome, /単独Rating/);
   assert.doesNotMatch(desktopHome, /emailNormalized|Common Account ID|ユーザーID/);
+});
+
+test('desktop Web Home describes local Rating calculation after Phase 9', () => {
+  const desktopHome = readText('components/web/DartsAppDesktopHome.tsx');
+
+  assert.match(desktopHome, /Ratingは端末内で計算・保存されます/);
+  assert.match(desktopHome, /音源、動画、カメラ判定は未実装/);
+  assert.doesNotMatch(desktopHome, /Rating計算本体.*未実装/);
+  assert.match(desktopHome, /Rating詳細を見る/);
+  assert.match(desktopHome, /\/account\/rating/);
 });
 
 test('mobile and Expo Go keep the legacy Support Home branch', () => {

@@ -164,6 +164,215 @@ test('rating application excludes GUEST or owner-mismatched evaluations without 
   }
 });
 
+test('rating history lists latest valid snapshots and source result details', async () => {
+  const db = await createMigratedTestDatabase();
+  try {
+    const fixture = await createRatingFixture(db);
+    await seedMatchEvaluation(db, fixture, {
+      index: 1,
+      completedAt: '2026-07-10T00:00:00.000Z',
+      ppdMilli: 20_000,
+      mprMilli: 1_800,
+      result: 'win',
+      completionReason: 'two_zero',
+    });
+    await seedMatchEvaluation(db, fixture, {
+      index: 2,
+      completedAt: '2026-07-11T00:00:00.000Z',
+      ppdMilli: 21_000,
+      mprMilli: 2_000,
+      result: 'loss',
+      completionReason: 'two_one',
+    });
+    await seedMatchEvaluation(db, fixture, {
+      index: 3,
+      completedAt: '2026-07-12T00:00:00.000Z',
+      ppdMilli: 22_000,
+      mprMilli: 2_100,
+      result: 'win',
+      completionReason: 'two_zero',
+    });
+
+    const service = new RatingApplicationService(new SqliteRatingRepository(db), () => NOW);
+    await service.processPending({ calculationDateTime: NOW });
+
+    const snapshots = await service.listSnapshots(fixture.accountId);
+    assert.equal(snapshots.length, 3);
+    assert.equal(snapshots[0].invalidatedAt, null);
+    assert.ok(snapshots[0].createdAt >= snapshots[1].createdAt);
+
+    const result = await service.getRatingResultForSource({ sourceMatchId: 'match-rating-3' });
+    assert.equal(result.status, 'applied');
+    if (result.status !== 'applied') return;
+    assert.equal(result.sourceType, 'match');
+    assert.equal(result.snapshot.evaluationId, 'eval-match-rating-3');
+    assert.equal(result.snapshot.evaluatedMatchCount, 3);
+
+    const missing = await service.getRatingResultForSource({ sourceGameId: 'count-up-not-rating' });
+    assert.equal(missing.status, 'not_target');
+  } finally {
+    db.close();
+  }
+});
+
+test('rating recalculation invalidates older source revisions and replays latest evaluations', async () => {
+  const db = await createMigratedTestDatabase();
+  try {
+    const fixture = await createRatingFixture(db);
+    await seedMatchEvaluation(db, fixture, {
+      index: 1,
+      completedAt: '2026-07-10T00:00:00.000Z',
+      ppdMilli: 20_000,
+      mprMilli: 1_800,
+      result: 'win',
+      completionReason: 'two_zero',
+    });
+    await seedMatchEvaluation(db, fixture, {
+      index: 2,
+      completedAt: '2026-07-11T00:00:00.000Z',
+      ppdMilli: 21_000,
+      mprMilli: 2_000,
+      result: 'loss',
+      completionReason: 'two_one',
+    });
+    await seedMatchEvaluation(db, fixture, {
+      index: 3,
+      completedAt: '2026-07-12T00:00:00.000Z',
+      ppdMilli: 22_000,
+      mprMilli: 2_100,
+      result: 'win',
+      completionReason: 'two_zero',
+    });
+
+    const service = new RatingApplicationService(new SqliteRatingRepository(db), () => NOW);
+    await service.processPending({ calculationDateTime: NOW });
+    const beforeProfile = await loadRatingProfileForAssert(db, fixture.accountId);
+
+    await seedMatchEvaluation(db, fixture, {
+      index: 2,
+      completedAt: '2026-07-11T00:00:00.000Z',
+      ppdMilli: 30_000,
+      mprMilli: 2_400,
+      result: 'win',
+      completionReason: 'two_one',
+      sourceRevision: 2,
+    });
+
+    const result = await service.recalculateFromEvaluation(
+      'eval-match-rating-2-rev-2',
+      '2026-07-15T03:00:00.000Z',
+    );
+
+    assert.equal(result.accountId, fixture.accountId);
+    assert.deepEqual(result.invalidatedEvaluationIds, ['eval-match-rating-2']);
+    assert.equal(result.invalidatedSnapshotIds.length, 2);
+    assert.deepEqual(result.replayedEvaluationIds, [
+      'eval-match-rating-2-rev-2',
+      'eval-match-rating-3',
+    ]);
+    assert.notEqual(result.finalSnapshotId, null);
+
+    const oldRevision = await db.getFirstAsync<{ status: string; invalidated_at: string | null }>(
+      `SELECT status, invalidated_at FROM rating_evaluations WHERE id = 'eval-match-rating-2'`,
+    );
+    assert.equal(oldRevision?.status, 'invalidated');
+    assert.equal(oldRevision?.invalidated_at, '2026-07-15T03:00:00.000Z');
+
+    const validSnapshots = await service.listSnapshots(fixture.accountId);
+    assert.ok(validSnapshots.length >= 2);
+    assert.equal(
+      validSnapshots.some((snapshot) => snapshot.evaluationId === 'eval-match-rating-2'),
+      false,
+    );
+    assert.equal(
+      validSnapshots.some((snapshot) => snapshot.evaluationId === 'eval-match-rating-2-rev-2'),
+      true,
+    );
+
+    const finalSnapshot = validSnapshots.find((snapshot) => snapshot.id === result.finalSnapshotId);
+    const afterProfile = await loadRatingProfileForAssert(db, fixture.accountId);
+    assert.equal(afterProfile?.rating_tenths, finalSnapshot?.ratingTenths);
+    assert.equal(afterProfile?.precise_rating_milli, finalSnapshot?.preciseRatingMilli);
+    assert.notEqual(afterProfile?.precise_rating_milli, beforeProfile?.precise_rating_milli);
+  } finally {
+    db.close();
+  }
+});
+
+test('rating recalculation clears from the anchor and replays remaining latest sources', async () => {
+  const db = await createMigratedTestDatabase();
+  try {
+    const fixture = await createRatingFixture(db);
+    await seedMatchEvaluation(db, fixture, {
+      index: 1,
+      completedAt: '2026-07-10T00:00:00.000Z',
+      ppdMilli: 20_000,
+      mprMilli: 1_800,
+      result: 'win',
+      completionReason: 'two_zero',
+    });
+    await seedMatchEvaluation(db, fixture, {
+      index: 2,
+      completedAt: '2026-07-11T00:00:00.000Z',
+      ppdMilli: 21_000,
+      mprMilli: 2_000,
+      result: 'loss',
+      completionReason: 'two_one',
+    });
+    await seedMatchEvaluation(db, fixture, {
+      index: 3,
+      completedAt: '2026-07-12T00:00:00.000Z',
+      ppdMilli: 22_000,
+      mprMilli: 2_100,
+      result: 'win',
+      completionReason: 'two_zero',
+    });
+
+    const service = new RatingApplicationService(new SqliteRatingRepository(db), () => NOW);
+    await service.processPending({ calculationDateTime: NOW });
+    await seedMatchEvaluation(db, fixture, {
+      index: 1,
+      completedAt: '2026-07-10T00:00:00.000Z',
+      ppdMilli: 20_000,
+      mprMilli: 1_800,
+      result: 'win',
+      completionReason: 'two_zero',
+      sourceRevision: 2,
+      candidateFlag: false,
+    });
+
+    const result = await service.recalculateFromEvaluation(
+      'eval-match-rating-1-rev-2',
+      '2026-07-15T04:00:00.000Z',
+    );
+
+    assert.deepEqual(result.invalidatedEvaluationIds, ['eval-match-rating-1']);
+    assert.equal(result.invalidatedSnapshotIds.length, 3);
+    assert.equal(result.replayedEvaluationIds.includes('eval-match-rating-1-rev-2'), true);
+    assert.notEqual(result.finalSnapshotId, null);
+
+    const latestRevision = await db.getFirstAsync<{ status: string }>(
+      `SELECT status FROM rating_evaluations WHERE id = 'eval-match-rating-1-rev-2'`,
+    );
+    assert.equal(latestRevision?.status, 'excluded');
+
+    const profile = await loadRatingProfileForAssert(db, fixture.accountId);
+    assert.equal(profile?.measurement_status, 'provisional_2_of_3');
+    assert.equal(profile?.eligible_match_count, 2);
+    assert.equal(profile?.last_evaluated_at, '2026-07-15T04:00:00.000Z');
+    const validSnapshots = await service.listSnapshots(fixture.accountId);
+    assert.equal(validSnapshots.length, 2);
+    assert.equal(
+      validSnapshots.every((snapshot) => snapshot.evaluationId !== 'eval-match-rating-1'),
+      true,
+    );
+    const finalSnapshot = validSnapshots.find((snapshot) => snapshot.id === result.finalSnapshotId);
+    assert.equal(profile?.rating_tenths, finalSnapshot?.ratingTenths);
+  } finally {
+    db.close();
+  }
+});
+
 async function createRatingFixture(db: GameDatabaseConnection) {
   const account = await createAccountService(db).registerLocalAccount({
     userName: 'rating_owner',
@@ -184,6 +393,16 @@ async function createRatingFixture(db: GameDatabaseConnection) {
   };
 }
 
+async function loadRatingProfileForAssert(db: GameDatabaseConnection, accountId: string) {
+  return db.getFirstAsync<{
+    measurement_status: string;
+    rating_tenths: number | null;
+    precise_rating_milli: number | null;
+    eligible_match_count: number;
+    last_evaluated_at: string | null;
+  }>('SELECT * FROM rating_profiles WHERE account_id = ?', accountId);
+}
+
 async function seedMatchEvaluation(
   db: GameDatabaseConnection,
   fixture: Awaited<ReturnType<typeof createRatingFixture>>,
@@ -194,12 +413,18 @@ async function seedMatchEvaluation(
     mprMilli: number;
     result: 'win' | 'loss';
     completionReason: 'two_zero' | 'two_one';
+    sourceRevision?: number;
+    candidateFlag?: boolean;
   },
 ) {
   const matchId = `match-rating-${input.index}`;
-  const evaluationId = `eval-match-rating-${input.index}`;
+  const sourceRevision = input.sourceRevision ?? 1;
+  const evaluationId =
+    sourceRevision === 1
+      ? `eval-match-rating-${input.index}`
+      : `eval-match-rating-${input.index}-rev-${sourceRevision}`;
   await db.runAsync(
-    `INSERT INTO matches(
+    `INSERT OR IGNORE INTO matches(
        id, status, zero_one_start_score, out_rule, bull_rule, current_game_no,
        winner_player_id, loser_player_id, completion_reason, started_at,
        completed_at, created_at, updated_at
@@ -222,12 +447,14 @@ async function seedMatchEvaluation(
        total_rounds, source_weight_milli, adjusted_darts, correction_count,
        input_payload_json, created_at
      )
-     VALUES (?, ?, ?, 'match', ?, NULL, 1, 'pending', 1, ?, 1, ?, 1, ?, 45, 15,
+     VALUES (?, ?, ?, 'match', ?, NULL, ?, 'pending', ?, ?, 1, ?, 1, ?, 45, 15,
              1000, 0, 0, ?, ?)`,
     evaluationId,
     fixture.accountId,
     fixture.ownerPlayerId,
     matchId,
+    sourceRevision,
+    input.candidateFlag === false ? 0 : 1,
     input.result,
     input.ppdMilli,
     input.mprMilli,
