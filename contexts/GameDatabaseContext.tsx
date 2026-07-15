@@ -143,6 +143,12 @@ function GameDatabaseRepositoryBridge({
   }, [isAppStateLoading, repositories, services, setValue]);
 
   useEffect(() => {
+    void services.rating.processPending().catch((error) => {
+      console.warn('Rating pending processing failed', error);
+    });
+  }, [services]);
+
+  useEffect(() => {
     const nextBootstrapInput: AccountBootstrapInputs = {
       activeAccountId,
       isAppStateLoading,

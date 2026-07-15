@@ -250,10 +250,7 @@ docs/implementation/PHASE_9_REPORT.md
 最低限:
 
 ```ts
-export type RatingSourceType =
-  | 'match'
-  | 'standalone_zero_one'
-  | 'standalone_cricket';
+export type RatingSourceType = 'match' | 'standalone_zero_one' | 'standalone_cricket';
 
 export type MeasurementStatus =
   | 'unmeasured'
@@ -353,9 +350,10 @@ MATCH内に01が2GAMEある場合、GAME PPDの単純平均は禁止。
 PPD anchors:
 
 ```ts
-[10.000,13.333,15.000,16.667,18.333,20.000,
- 21.667,23.333,25.000,26.667,28.333,30.000,
- 32.000,34.000,36.000,38.000,40.000,42.000]
+[
+  10.0, 13.333, 15.0, 16.667, 18.333, 20.0, 21.667, 23.333, 25.0, 26.667, 28.333, 30.0, 32.0, 34.0,
+  36.0, 38.0, 40.0, 42.0,
+];
 ```
 
 アンカー間は線形補間、1～18へclamp。
@@ -379,8 +377,7 @@ MPR = 有効マーク合計 ÷ 確定TURN数
 MPR anchors:
 
 ```ts
-[0.8,1.0,1.2,1.4,1.6,1.8,2.0,2.2,2.4,
- 2.6,2.8,3.0,3.2,3.4,3.6,3.8,4.0,4.2]
+[0.8, 1.0, 1.2, 1.4, 1.6, 1.8, 2.0, 2.2, 2.4, 2.6, 2.8, 3.0, 3.2, 3.4, 3.6, 3.8, 4.0, 4.2];
 ```
 
 ---

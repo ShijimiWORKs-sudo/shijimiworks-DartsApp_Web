@@ -91,6 +91,8 @@ export default function HomeScreen() {
           return;
         }
 
+        await services.rating.processPending();
+
         const [
           countUp,
           zeroOne,

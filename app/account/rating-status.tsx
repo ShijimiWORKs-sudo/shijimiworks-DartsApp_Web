@@ -31,6 +31,7 @@ export default function AccountRatingStatusScreen() {
   const { services } = useGameDatabase();
   const isDesktopWeb = useDesktopWebLayout();
   const accountService = (services as ServicesWithAccount | null)?.account ?? null;
+  const ratingService = services?.rating ?? null;
   const activeAccountId = appState.activeAccountId ?? null;
   const [overview, setOverview] = useState<AccountOverview | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -52,6 +53,7 @@ export default function AccountRatingStatusScreen() {
         }
 
         try {
+          await ratingService?.processPending();
           const nextOverview = await accountService.getActiveAccount(activeAccountId);
           if (!mounted) {
             return;
@@ -78,7 +80,7 @@ export default function AccountRatingStatusScreen() {
       return () => {
         mounted = false;
       };
-    }, [accountService, activeAccountId, router]),
+    }, [accountService, activeAccountId, ratingService, router]),
   );
 
   return (

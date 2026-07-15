@@ -2,13 +2,14 @@
 
 DartsApp は、Windows PC Webでソフトダーツのゲーム進行、手入力スコア、ローカルSQLite保存を確認するための Expo + React Native アプリです。
 
-MVP v0.1 由来の練習支援画面も残っていますが、DartsApp側の正式対象はPC WebのCOUNT-UP、01、STANDARD CRICKET、MATCH、Account、Rating評価候補のローカル動作です。実データ連携やAI連携は行わず、端末内ローカル保存と固定ロジックで確認します。
+MVP v0.1 由来の練習支援画面も残っていますが、DartsApp側の正式対象はPC WebのCOUNT-UP、01、STANDARD CRICKET、MATCH、Account、Rating計算のローカル動作です。実データ連携やAI連携は行わず、端末内ローカル保存と固定ロジックで確認します。
 
 ## MVPでできること
 
 - 初期設定: レーティング、利用機種、主な悩みを保存
 - ゲーム: COUNT-UP、単独01、単独STANDARD CRICKET、2人対戦MATCHの開始、再開、手入力、undo/redo、一時停止、中断、結果表示
 - Account: 端末内ローカルAccountでRating所有者を識別
+- Rating: Eligible MATCH 3件で初回確定し、確定後の単独01/CRICKETで各Indexを更新
 - 練習メニュー: レベル、悩み、ゲーム種別に応じたメニュー表示
 - おすすめ練習: プロフィールと記録に基づく固定ロジック推薦
 - 練習記録: 入力、一覧、詳細、編集、削除
@@ -197,6 +198,7 @@ Phase 4では、ローカルAccount、OWNER紐付け、Rating Profile、単独Ra
 共通Account契約では、DartsApp / DartsSupportApp連携へ向けてAccount ID、共通JSON、CommonEvent、Outbox、Export / Import検証の境界を追加します。
 Phase 5では、1人用の単独STANDARD CRICKET縦断実装を追加しています。
 Phase 6では、2人対戦MATCH縦断実装を追加しています。
+Phase 9では、DartsApp Rating Engine v2、Snapshot更新、Profile反映を追加しています。
 Phase 8では、PC Web横長ゲームUI、Webトップナビ、1280x720向けのゲーム画面配置を追加しています。
 
 - DBファイル名: `dartsapp_games.db`
@@ -268,18 +270,22 @@ COUNT-UPでできること:
 - `/game/match/[matchId]` で手入力、undo/redo、TURN終了、一時停止、再開、中断、手動勝者確定
 - undo/redoは `darts.status` を `active` / `voided` に更新し、物理削除しない
 - MATCH完了時に `match_player_results`、OWNERのみのpending `rating_evaluations`、`rating_evaluation_games`、`rating_recalculate` Outbox、`common_events`、`common_outbox(local_only)` を作成
-- Rating計算本体とSnapshot更新はPhase 6では実行しない
+- Phase 9のRating処理でpending Evaluationを時系列に適用し、`rating_snapshots` と `rating_profiles` を更新
 - DartsSupportApp通信、API通信、クラウド同期は実装しない
 
-Account / Rating基盤:
+Account / Rating:
 
 - `/account/register` で端末内ローカルAccountを登録
 - `/account/profile` でAccount状態、OWNER紐付け、Rating状態、共通Account IDを表示
-- `/account/rating-status` で初回MATCH測定状態と単独Rating対象可否を表示
+- `/account/rating-status` でDartsApp Rating、Confidence、Eligible MATCH件数、単独対象件数、01/Cricket/Match Index、最終評価日時を表示
 - Account登録はゲーム開始の必須条件ではありません
 - GUESTには正式Rating Profile、Rating Evaluation、Rating Snapshotを作成しません
 - COUNT-UPは常にRating対象外です
-- Rating計算本体、Snapshot更新エンジン、Rating履歴画面の完全実装は後続フェーズで扱います
+- `calculation_version = 2` の純粋TypeScript Rating Engineで、Eligible MATCH 3件だけが初回Ratingを確定します
+- 初回確定前の単独01/CRICKETは遡及利用せず、確定後の単独01は01 Indexだけ、単独CRICKETはCricket Indexだけを更新します
+- 単独ゲーム1件の総合Rating変動は最大±0.2に制限し、Match Indexは単独ゲームで変更しません
+- Evaluation、Snapshot、Profile、`rating_recalculate` Outbox更新は同一transactionで処理します
+- GUESTには正式Rating Profile、Rating Evaluation、Rating Snapshotを作成しません
 
 共通Account契約:
 
@@ -291,7 +297,7 @@ Account / Rating基盤:
 - 現段階のOutbox状態は `local_only` で、DartsSupportApp通信、API通信、クラウド同期は実装しません
 - Importはcontract名、version、UUID、payloadの検証と件数プレビューだけを行い、既存DBを無条件上書きしません
 
-Rating計算本体、効果音・アワード動画は次フェーズ以降で実装します。
+Rating履歴の専用画面、効果音・アワード動画は次フェーズ以降で実装します。
 
 ## App identity
 
@@ -334,6 +340,7 @@ Rating計算本体、効果音・アワード動画は次フェーズ以降で�
 - `docs/implementation/PHASE_5_REPORT.md`
 - `docs/implementation/PHASE_6_REPORT.md`
 - `docs/implementation/PHASE_7_REPORT.md`
+- `docs/implementation/PHASE_9_REPORT.md`
 - `docs/PC_WEB_SETUP.md`
 - `docs/PC_WEB_QA_CHECKLIST.md`
 - `docs/implementation/OPEN_QUESTIONS.md`

@@ -8,6 +8,7 @@ import type {
   Player,
   RatingSnapshot,
 } from '../domain/types';
+import type { RatingUpdateInput, RatingUpdateOutput } from '../domain/rating';
 
 export type PlayerRepository = {
   getOrCreateOwner(input?: CreateOwnerPlayerInput): Promise<Player>;
@@ -29,7 +30,31 @@ export type GameRepository = {
 
 export type RatingRepository = {
   getLatestSnapshot(playerId: string): Promise<RatingSnapshot | null>;
+  listPendingEvaluationRefs(limit?: number): Promise<RatingEvaluationRef[]>;
+  applyEvaluationUpdate(
+    evaluationId: string,
+    calculationDateTime: string,
+    calculate: (input: RatingUpdateInput) => RatingUpdateOutput,
+  ): Promise<RatingEvaluationApplyResult>;
 };
+
+export type RatingEvaluationRef = {
+  evaluationId: string;
+  accountId: string;
+};
+
+export type RatingEvaluationApplyResult =
+  | {
+      status: 'applied' | 'excluded' | 'already_applied' | 'skipped';
+      evaluationId: string;
+      accountId: string | null;
+      reasonCodes?: string[];
+    }
+  | {
+      status: 'not_found';
+      evaluationId: string;
+      accountId: null;
+    };
 
 export type IntegrationOutboxRepository = {
   enqueue(input: EnqueueOutboxInput): Promise<IntegrationOutboxEvent>;

@@ -44,6 +44,8 @@ export default function GameHubScreen() {
       return;
     }
 
+    await services.rating.processPending();
+
     const [
       activeCountUp,
       activeZeroOne,
