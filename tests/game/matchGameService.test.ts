@@ -234,6 +234,142 @@ test('MATCH saves weighted 01 PPD separately from three dart average for rating'
   }
 });
 
+test('MATCH natural 501 checkout counts the final checkout darts in PPD', async () => {
+  const db = await createMigratedTestDatabase();
+  try {
+    const { service, ownerPlayerId, guestPlayerId } = await createMatchFixture(db);
+    let match = await service.startMatch({
+      zeroOneStartScore: 501,
+      outRule: 'single_out',
+      bullRule: 'fat_bull',
+      player1Id: ownerPlayerId,
+      player2Id: guestPlayerId,
+      game1FirstThrowPlayerId: ownerPlayerId,
+    });
+
+    for (const [index, action] of (
+      [
+        ['triple', 20],
+        ['triple', 20],
+        ['triple', 20],
+      ] as const
+    ).entries()) {
+      match = await service.recordDart(match.matchId, {
+        area: action[0],
+        segmentNumber: action[1],
+        clientActionId: `checkout-r1-${index}`,
+      });
+    }
+    match = await service.confirmTurn(match.matchId);
+    match = await service.recordDart(match.matchId, {
+      area: 'miss',
+      segmentNumber: null,
+      clientActionId: 'guest-miss-1',
+    });
+    match = await service.confirmTurn(match.matchId);
+
+    for (const [index, action] of (
+      [
+        ['triple', 20],
+        ['triple', 20],
+        ['triple', 20],
+      ] as const
+    ).entries()) {
+      match = await service.recordDart(match.matchId, {
+        area: action[0],
+        segmentNumber: action[1],
+        clientActionId: `checkout-r2-${index}`,
+      });
+    }
+    match = await service.confirmTurn(match.matchId);
+    match = await service.recordDart(match.matchId, {
+      area: 'miss',
+      segmentNumber: null,
+      clientActionId: 'guest-miss-2',
+    });
+    match = await service.confirmTurn(match.matchId);
+
+    match = await service.recordDart(match.matchId, {
+      area: 'triple',
+      segmentNumber: 20,
+      clientActionId: 'checkout-final-t20',
+    });
+    match = await service.recordDart(match.matchId, {
+      area: 'triple',
+      segmentNumber: 19,
+      clientActionId: 'checkout-final-t19',
+    });
+    match = await service.recordDart(match.matchId, {
+      area: 'double',
+      segmentNumber: 12,
+      clientActionId: 'checkout-final-d12',
+    });
+
+    assert.equal(match.activeGame, null);
+    assert.equal(match.phase, 'next_game_available');
+
+    const checkoutTurn = await db.getFirstAsync<{
+      id: string;
+      round_no: number;
+      status: string;
+      applied_score: number;
+      dart_count: number;
+      active_darts: number;
+      is_checkout: number;
+      is_bust: number;
+    }>(
+      `SELECT t.id, t.round_no, t.status, t.applied_score, t.dart_count,
+              COUNT(d.id) AS active_darts, t.is_checkout, t.is_bust
+       FROM turns t
+       LEFT JOIN darts d ON d.turn_id = t.id AND d.status = 'active'
+       WHERE t.game_id = ? AND t.is_checkout = 1
+       GROUP BY t.id
+       LIMIT 1`,
+      match.games[0]?.gameId,
+    );
+    assert.equal(checkoutTurn?.round_no, 3);
+    assert.equal(checkoutTurn?.status, 'checkout');
+    assert.equal(checkoutTurn?.applied_score, 141);
+    assert.equal(checkoutTurn?.dart_count, 3);
+    assert.equal(checkoutTurn?.active_darts, 3);
+
+    match = await service.startNextGame(match.matchId);
+    match = await service.completeCurrentGameByManualWinner(match.matchId, {
+      winnerPlayerId: ownerPlayerId,
+      reason: 'manual game two winner',
+    });
+
+    const refreshed = await service.loadMatch(match.matchId);
+    assert.equal(refreshed.status, 'completed');
+    assert.equal(refreshed.games[0]?.status, 'completed');
+    assert.equal(refreshed.result?.zeroOnePpdMilli, 55667);
+    assert.equal(refreshed.result?.zeroOneThreeDartAverageMilli, 167000);
+
+    const zeroOneResult = await db.getFirstAsync<{
+      effective_score: number;
+      darts_thrown: number;
+      ppd_milli: number | null;
+      three_dart_average_milli: number | null;
+      extra_stats_json: string;
+    }>(
+      `SELECT r.effective_score, r.darts_thrown, r.ppd_milli,
+              r.three_dart_average_milli, r.extra_stats_json
+       FROM game_player_results r
+       JOIN game_sessions g ON g.id = r.game_id
+       WHERE g.match_id = ? AND g.mode = 'zero_one' AND r.player_id = ?`,
+      match.matchId,
+      ownerPlayerId,
+    );
+    assert.equal(zeroOneResult?.effective_score, 501);
+    assert.equal(zeroOneResult?.darts_thrown, 9);
+    assert.equal(zeroOneResult?.ppd_milli, 55667);
+    assert.equal(zeroOneResult?.three_dart_average_milli, 167000);
+    assert.match(zeroOneResult?.extra_stats_json ?? '', /"zeroOneRatingDarts":9/);
+  } finally {
+    db.close();
+  }
+});
+
 test('MATCH rating repair creates a new source revision when stored PPD is stale', async () => {
   const db = await createMigratedTestDatabase();
   try {

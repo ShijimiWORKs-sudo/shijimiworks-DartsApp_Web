@@ -15,6 +15,7 @@ test('rating engine maps PPD and MPR anchors with clamp and interpolation', () =
   assert.equal(ppdMilliToRatingIndex(10_000), 1);
   assert.equal(ppdMilliToRatingIndex(42_000), 18);
   assert.equal(ppdMilliToRatingIndex(60_000), 18);
+  assert.equal(ppdMilliToRatingIndex(75_000), 18);
   assert.equal(ppdMilliToRatingIndex(15_000), 3);
   assert.equal(mprMilliToRatingIndex(800), 1);
   assert.equal(mprMilliToRatingIndex(4_200), 18);

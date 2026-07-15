@@ -28,6 +28,7 @@ Implemented:
 - MATCH 01 PPD and 3DA are stored and displayed as separate values
 - MATCH Rating observations use weighted effective score / Rating darts across all 01 games
 - Out-of-range Rating observations are excluded with `INVALID_PPD_RANGE` or `INVALID_MPR_RANGE`
+- Natural MATCH 01 CHECKOUT games count the final checkout darts and do not duplicate turn scores through dart joins
 
 Not implemented in this phase:
 
@@ -167,7 +168,9 @@ Added coverage:
 - PPD > 60 and MPR > 9 are excluded before Snapshot/Profile updates
 - MATCH result screen shows PPD and 3DA separately
 - MATCH source revision repair creates a new revision when stored PPD is stale
+- Natural 501 CHECKOUT in 9 darts stores `zero_one_ppd_milli = 55667` and `three_dart_average_milli = 167000`
+- Rating Index conversion clamps above-anchor PPD to Index 18 without clamping the raw stored PPD
 
 Final test suite result during implementation:
 
-- `npm.cmd test`: 268 passed
+- `npm.cmd test`: 269 passed

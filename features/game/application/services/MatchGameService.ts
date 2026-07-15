@@ -1481,11 +1481,25 @@ async function getPlayerGameStats(db: GameDatabaseExecutor, gameId: string, game
     'SELECT mode FROM game_sessions WHERE id = ?',
     gameId,
   );
-  const row = await db.getFirstAsync<{
-    totalScore: number;
+  const turnRow = await db.getFirstAsync<{
     effectiveScore: number;
     rounds: number;
     turns: number;
+    bust: number;
+    checkout: number;
+  }>(
+    `SELECT COALESCE(SUM(applied_score), 0) AS effectiveScore,
+            COALESCE(MAX(round_no), 0) AS rounds,
+            COUNT(CASE WHEN status <> 'in_progress' THEN id END) AS turns,
+            COUNT(CASE WHEN is_bust = 1 THEN id END) AS bust,
+            COUNT(CASE WHEN is_checkout = 1 THEN id END) AS checkout
+     FROM turns
+     WHERE game_id = ? AND game_player_id = ?`,
+    gameId,
+    gamePlayerId,
+  );
+  const row = await db.getFirstAsync<{
+    totalScore: number;
     darts: number;
     bull: number;
     innerBull: number;
@@ -1493,14 +1507,9 @@ async function getPlayerGameStats(db: GameDatabaseExecutor, gameId: string, game
     triple: number;
     double: number;
     miss: number;
-    bust: number;
-    checkout: number;
     marks: number;
   }>(
     `SELECT COALESCE(SUM(d.score), 0) AS totalScore,
-            COALESCE(SUM(t.applied_score), 0) AS effectiveScore,
-            COALESCE(MAX(t.round_no), 0) AS rounds,
-            COUNT(DISTINCT CASE WHEN t.status <> 'in_progress' THEN t.id END) AS turns,
             COUNT(d.id) AS darts,
             SUM(CASE WHEN d.area IN ('outer_bull', 'inner_bull') THEN 1 ELSE 0 END) AS bull,
             SUM(CASE WHEN d.area = 'inner_bull' THEN 1 ELSE 0 END) AS innerBull,
@@ -1508,8 +1517,6 @@ async function getPlayerGameStats(db: GameDatabaseExecutor, gameId: string, game
             SUM(CASE WHEN d.area = 'triple' THEN 1 ELSE 0 END) AS triple,
             SUM(CASE WHEN d.area = 'double' THEN 1 ELSE 0 END) AS double,
             SUM(CASE WHEN d.area = 'miss' THEN 1 ELSE 0 END) AS miss,
-            SUM(CASE WHEN t.is_bust = 1 THEN 1 ELSE 0 END) AS bust,
-            SUM(CASE WHEN t.is_checkout = 1 THEN 1 ELSE 0 END) AS checkout,
             COALESCE(SUM(d.cricket_marks), 0) AS marks
      FROM turns t
      LEFT JOIN darts d ON d.turn_id = t.id AND d.status = 'active'
@@ -1528,9 +1535,9 @@ async function getPlayerGameStats(db: GameDatabaseExecutor, gameId: string, game
   );
   return {
     totalScore: row?.totalScore ?? 0,
-    effectiveScore: row?.effectiveScore ?? 0,
-    rounds: row?.rounds ?? 0,
-    turns: row?.turns ?? 0,
+    effectiveScore: turnRow?.effectiveScore ?? 0,
+    rounds: turnRow?.rounds ?? 0,
+    turns: turnRow?.turns ?? 0,
     darts: row?.darts ?? 0,
     bull: row?.bull ?? 0,
     innerBull: row?.innerBull ?? 0,
@@ -1538,8 +1545,8 @@ async function getPlayerGameStats(db: GameDatabaseExecutor, gameId: string, game
     triple: row?.triple ?? 0,
     double: row?.double ?? 0,
     miss: row?.miss ?? 0,
-    bust: row?.bust ?? 0,
-    checkout: row?.checkout ?? 0,
+    bust: turnRow?.bust ?? 0,
+    checkout: (turnRow?.checkout ?? 0) > 0 ? 1 : 0,
     marks: row?.marks ?? 0,
     closed: closed?.count ?? 0,
     zeroOneRatingEffectiveScore: zeroOneRating.effectiveScore,
@@ -1553,8 +1560,8 @@ async function getPlayerGameStats(db: GameDatabaseExecutor, gameId: string, game
         ? calculateThreeDartAverageMilli(zeroOneRating.effectiveScore, zeroOneRating.ratingDarts)
         : null,
     mprMilli:
-      game?.mode === 'cricket' && row && row.turns > 0
-        ? Math.round((row.marks * 1000) / row.turns)
+      game?.mode === 'cricket' && turnRow && turnRow.turns > 0
+        ? Math.round(((row?.marks ?? 0) * 1000) / turnRow.turns)
         : null,
   };
 }
