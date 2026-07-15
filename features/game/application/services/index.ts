@@ -1,3 +1,4 @@
+import { ActiveSessionService } from './ActiveSessionService';
 import { CountUpGameService } from './CountUpGameService';
 import { CricketGameService } from './CricketGameService';
 import { MatchGameService } from './MatchGameService';
@@ -5,6 +6,12 @@ import { ZeroOneGameService } from './ZeroOneGameService';
 import { createAccountService, type AccountService } from '../../../account';
 import type { GameDatabaseConnection } from '../../infrastructure/sqlite/types';
 
+export {
+  ActiveSessionAbortFailedError,
+  ActiveSessionService,
+  type ActiveSessionInfo,
+  type ActiveSessionMode,
+} from './ActiveSessionService';
 export { CountUpRedoSession } from './CountUpRedoSession';
 export { createCountUpLeaveChoices } from './countUpLeaveActions';
 export type { CountUpLeaveChoice, CountUpLeaveChoiceId } from './countUpLeaveActions';
@@ -28,6 +35,7 @@ export type { ZeroOneGameServicePort, ZeroOneLastSettings } from './ZeroOneGameS
 
 export type GameServices = {
   account: AccountService;
+  activeSession: ActiveSessionService;
   countUp: CountUpGameService;
   cricket: CricketGameService;
   match: MatchGameService;
@@ -35,11 +43,22 @@ export type GameServices = {
 };
 
 export function createGameServices(db: GameDatabaseConnection): GameServices {
+  const countUp = new CountUpGameService(db);
+  const cricket = new CricketGameService(db);
+  const match = new MatchGameService(db);
+  const zeroOne = new ZeroOneGameService(db);
+
   return {
     account: createAccountService(db),
-    countUp: new CountUpGameService(db),
-    cricket: new CricketGameService(db),
-    match: new MatchGameService(db),
-    zeroOne: new ZeroOneGameService(db),
+    activeSession: new ActiveSessionService({
+      countUp,
+      cricket,
+      match,
+      zeroOne,
+    }),
+    countUp,
+    cricket,
+    match,
+    zeroOne,
   };
 }

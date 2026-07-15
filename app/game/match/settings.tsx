@@ -1,10 +1,11 @@
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useState } from 'react';
-import { Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { AppButton } from '../../../components/AppButton';
 import { Card } from '../../../components/Card';
 import { AccountLocalNotice } from '../../../components/account/AccountLocalNotice';
+import { ActiveSessionConflictDialog } from '../../../components/game/ActiveSessionConflictDialog';
 import { ScreenShell } from '../../../components/ScreenShell';
 import { SectionTitle } from '../../../components/SectionTitle';
 import { useDesktopWebLayout } from '../../../components/web/useDesktopWebLayout';
@@ -18,7 +19,7 @@ import { colors } from '../../../constants/theme';
 import { useAppState } from '../../../contexts/AppStateContext';
 import { useGameDatabase } from '../../../contexts/GameDatabaseContext';
 import type { AccountOverview } from '../../../features/account/domain';
-import { MatchActiveExistsError } from '../../../features/game/application/services';
+import type { ActiveSessionInfo } from '../../../features/game/application/services';
 import type { MatchZeroOneStartScore } from '../../../features/game/domain/match';
 import type { BullRule } from '../../../features/game/domain/types';
 import type { ZeroOneOutRule } from '../../../features/game/domain/zeroOne';
@@ -32,6 +33,8 @@ const bullRuleOptions: { value: BullRule; label: string }[] = [
   { value: 'fat_bull', label: 'Fat Bull' },
   { value: 'separate_bull', label: 'Separate Bull' },
 ];
+const genericStartError =
+  'ゲームを開始できませんでした。進行中のゲームを確認して、もう一度お試しください。';
 
 export default function MatchSettingsScreen() {
   const router = useRouter();
@@ -44,6 +47,9 @@ export default function MatchSettingsScreen() {
   const [guestName, setGuestName] = useState('GUEST 1');
   const [game1FirstThrow, setGame1FirstThrow] = useState<'owner' | 'guest'>('owner');
   const [accountOverview, setAccountOverview] = useState<AccountOverview | null>(null);
+  const [conflictSession, setConflictSession] = useState<ActiveSessionInfo | null>(null);
+  const [startError, setStartError] = useState<string | null>(null);
+  const [isConflictProcessing, setIsConflictProcessing] = useState(false);
   const [isStarting, setIsStarting] = useState(false);
 
   useFocusEffect(
@@ -90,6 +96,7 @@ export default function MatchSettingsScreen() {
       player2Id: guest.id,
       game1FirstThrowPlayerId,
     });
+    setStartError(null);
     router.replace(`/game/match/${match.matchId}`);
   }, [
     bullRule,
@@ -106,28 +113,66 @@ export default function MatchSettingsScreen() {
   const handleStart = useCallback(async () => {
     if (!services) return;
     setIsStarting(true);
+    setStartError(null);
     try {
-      await startMatch();
-    } catch (error) {
-      if (error instanceof MatchActiveExistsError) {
-        Alert.alert('進行中のMATCHがあります', '既存MATCHを再開してください。', [
-          { text: 'キャンセル', style: 'cancel' },
-          {
-            text: '再開する',
-            onPress: () => router.replace(`/game/match/${error.matchId}`),
-          },
-        ]);
+      const activeSession = await services.activeSession.findActiveSession();
+      if (activeSession) {
+        setConflictSession(activeSession);
         return;
       }
-      Alert.alert('MATCHを開始できませんでした', getErrorMessage(error));
+      await startMatch();
+    } catch (error) {
+      console.warn('MATCH start failed', error);
+      setStartError(genericStartError);
     } finally {
       setIsStarting(false);
     }
-  }, [router, services, startMatch]);
+  }, [services, startMatch]);
+
+  const handleResumeConflict = useCallback(() => {
+    if (!conflictSession || isConflictProcessing) {
+      return;
+    }
+    setConflictSession(null);
+    router.replace(conflictSession.route);
+  }, [conflictSession, isConflictProcessing, router]);
+
+  const handleAbortConflictAndStart = useCallback(async () => {
+    if (!services || !conflictSession || isConflictProcessing) {
+      return;
+    }
+
+    setIsConflictProcessing(true);
+    setStartError(null);
+    try {
+      await services.activeSession.abortActiveSession(conflictSession);
+      setConflictSession(null);
+      await startMatch();
+    } catch (error) {
+      console.warn('MATCH conflict resolution failed', error);
+      setStartError(genericStartError);
+    } finally {
+      setIsConflictProcessing(false);
+      setIsStarting(false);
+    }
+  }, [conflictSession, isConflictProcessing, services, startMatch]);
 
   const guestDisplayName = guestName.trim() || 'GUEST 1';
   const game1FirstThrowLabel = game1FirstThrow === 'owner' ? 'PLAYER 1' : guestDisplayName;
   const ratingStatus = accountOverview ? 'OWNER Playerのみ候補' : '対象外';
+
+  const conflictDialog = (
+    <ActiveSessionConflictDialog
+      visible={conflictSession !== null}
+      activeMode={conflictSession?.mode ?? 'match'}
+      activeLabel={conflictSession?.label ?? 'MATCH'}
+      activeStatus={conflictSession?.status}
+      onResume={handleResumeConflict}
+      onAbortAndStart={() => void handleAbortConflictAndStart()}
+      onCancel={() => setConflictSession(null)}
+      isProcessing={isConflictProcessing}
+    />
+  );
 
   const gameOneCard = (
     <Card style={isDesktopWeb && webGameSettingsStyles.settingsGridCard}>
@@ -245,9 +290,11 @@ export default function MatchSettingsScreen() {
               <WebSettingsSummaryRow label="Bull" value={getBullRuleLabel(bullRule)} />
               <WebSettingsSummaryRow label="GAME1先攻" value={game1FirstThrowLabel} />
               <WebSettingsSummaryRow label="Rating" value={ratingStatus} />
+              {startError ? <Text style={styles.startError}>{startError}</Text> : null}
             </WebSettingsSummaryCard>
           }
         />
+        {conflictDialog}
       </ScreenShell>
     );
   }
@@ -289,6 +336,12 @@ export default function MatchSettingsScreen() {
 
       {outBullCard}
 
+      {startError ? (
+        <Card muted>
+          <Text style={styles.startError}>{startError}</Text>
+        </Card>
+      ) : null}
+
       <View style={styles.actions}>
         <AppButton
           label={isStarting ? '開始中...' : 'MATCH開始'}
@@ -298,6 +351,7 @@ export default function MatchSettingsScreen() {
         />
         <AppButton label="戻る" onPress={() => router.replace('/game')} variant="secondary" />
       </View>
+      {conflictDialog}
     </ScreenShell>
   );
 }
@@ -350,10 +404,6 @@ function ChoiceRow({
       <Text style={[styles.optionTitle, selected && styles.optionTitleSelected]}>{label}</Text>
     </Pressable>
   );
-}
-
-function getErrorMessage(error: unknown) {
-  return error instanceof Error ? error.message : '不明なエラーです。';
 }
 
 function getOutRuleLabel(outRule: Exclude<ZeroOneOutRule, 'double_out'>) {
@@ -431,6 +481,12 @@ const styles = StyleSheet.create({
     color: colors.text,
     fontSize: 16,
     fontWeight: '900',
+  },
+  startError: {
+    color: colors.danger,
+    fontSize: 14,
+    fontWeight: '800',
+    lineHeight: 20,
   },
   actions: {
     gap: 10,

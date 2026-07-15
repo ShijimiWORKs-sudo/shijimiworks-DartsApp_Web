@@ -1,10 +1,11 @@
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useState } from 'react';
-import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { AppButton } from '../../../components/AppButton';
 import { Card } from '../../../components/Card';
 import { AccountLocalNotice } from '../../../components/account/AccountLocalNotice';
+import { ActiveSessionConflictDialog } from '../../../components/game/ActiveSessionConflictDialog';
 import { ScreenShell } from '../../../components/ScreenShell';
 import { SectionTitle } from '../../../components/SectionTitle';
 import { useDesktopWebLayout } from '../../../components/web/useDesktopWebLayout';
@@ -18,7 +19,7 @@ import { colors } from '../../../constants/theme';
 import { useAppState } from '../../../contexts/AppStateContext';
 import { useGameDatabase } from '../../../contexts/GameDatabaseContext';
 import type { AccountOverview } from '../../../features/account/domain';
-import { CricketActiveGameExistsError } from '../../../features/game/application/services';
+import type { ActiveSessionInfo } from '../../../features/game/application/services';
 import type { BullRule } from '../../../features/game/domain/types';
 
 const bullRuleOptions: { value: BullRule; label: string; helper: string }[] = [
@@ -29,6 +30,8 @@ const bullRuleOptions: { value: BullRule; label: string; helper: string }[] = [
     helper: 'Outer Bull 1マーク、Inner Bull 2マーク',
   },
 ];
+const genericStartError =
+  'ゲームを開始できませんでした。進行中のゲームを確認して、もう一度お試しください。';
 
 export default function CricketSettingsScreen() {
   const router = useRouter();
@@ -37,6 +40,9 @@ export default function CricketSettingsScreen() {
   const isDesktopWeb = useDesktopWebLayout();
   const [bullRule, setBullRule] = useState<BullRule>('fat_bull');
   const [accountOverview, setAccountOverview] = useState<AccountOverview | null>(null);
+  const [conflictSession, setConflictSession] = useState<ActiveSessionInfo | null>(null);
+  const [startError, setStartError] = useState<string | null>(null);
+  const [isConflictProcessing, setIsConflictProcessing] = useState(false);
   const [isStarting, setIsStarting] = useState(false);
 
   useFocusEffect(
@@ -74,6 +80,7 @@ export default function CricketSettingsScreen() {
       bullRule,
       ownerName: profile ? `RT ${profile.rating}` : 'PLAYER 1',
     });
+    setStartError(null);
     router.replace(`/game/cricket/${game.gameId}`);
   }, [bullRule, profile, router, services]);
 
@@ -83,60 +90,64 @@ export default function CricketSettingsScreen() {
     }
 
     setIsStarting(true);
+    setStartError(null);
     try {
-      await startCricket();
-    } catch (error) {
-      if (error instanceof CricketActiveGameExistsError) {
-        const [activeCricket, activeZeroOne, activeCountUp] = await Promise.all([
-          services.cricket.getActiveGame(),
-          services.zeroOne.getActiveGame(),
-          services.countUp.getActiveGame(),
-        ]);
-        const activeRoute = activeCricket
-          ? `/game/cricket/${activeCricket.gameId}`
-          : activeZeroOne
-            ? `/game/01/${activeZeroOne.gameId}`
-            : activeCountUp
-              ? `/game/count-up/${activeCountUp.gameId}`
-              : '/game';
-
-        Alert.alert(
-          '進行中のゲームがあります',
-          '再開するか、途中終了してCRICKET設定を続けられます。',
-          [
-            { text: 'キャンセル', style: 'cancel' },
-            { text: '再開する', onPress: () => router.replace(activeRoute) },
-            {
-              text: '途中終了して新規設定へ',
-              style: 'destructive',
-              onPress: () => {
-                void (async () => {
-                  try {
-                    if (activeCricket) {
-                      await services.cricket.abortGame(activeCricket.gameId);
-                    } else if (activeZeroOne) {
-                      await services.zeroOne.abortGame(activeZeroOne.gameId);
-                    } else if (activeCountUp) {
-                      await services.countUp.abortGame(activeCountUp.gameId);
-                    }
-                    await startCricket();
-                  } catch (nextError) {
-                    Alert.alert('CRICKETを開始できませんでした', getErrorMessage(nextError));
-                  }
-                })();
-              },
-            },
-          ],
-        );
+      const activeSession = await services.activeSession.findActiveSession();
+      if (activeSession) {
+        setConflictSession(activeSession);
         return;
       }
-      Alert.alert('CRICKETを開始できませんでした', getErrorMessage(error));
+      await startCricket();
+    } catch (error) {
+      console.warn('CRICKET start failed', error);
+      setStartError(genericStartError);
     } finally {
       setIsStarting(false);
     }
-  }, [router, services, startCricket]);
+  }, [services, startCricket]);
+
+  const handleResumeConflict = useCallback(() => {
+    if (!conflictSession || isConflictProcessing) {
+      return;
+    }
+    setConflictSession(null);
+    router.replace(conflictSession.route);
+  }, [conflictSession, isConflictProcessing, router]);
+
+  const handleAbortConflictAndStart = useCallback(async () => {
+    if (!services || !conflictSession || isConflictProcessing) {
+      return;
+    }
+
+    setIsConflictProcessing(true);
+    setStartError(null);
+    try {
+      await services.activeSession.abortActiveSession(conflictSession);
+      setConflictSession(null);
+      await startCricket();
+    } catch (error) {
+      console.warn('CRICKET conflict resolution failed', error);
+      setStartError(genericStartError);
+    } finally {
+      setIsConflictProcessing(false);
+      setIsStarting(false);
+    }
+  }, [conflictSession, isConflictProcessing, services, startCricket]);
 
   const ratingStatus = accountOverview?.ratingProfile.establishedAt ? '候補対象' : '対象外';
+
+  const conflictDialog = (
+    <ActiveSessionConflictDialog
+      visible={conflictSession !== null}
+      activeMode={conflictSession?.mode ?? 'cricket'}
+      activeLabel={conflictSession?.label ?? 'STANDARD CRICKET'}
+      activeStatus={conflictSession?.status}
+      onResume={handleResumeConflict}
+      onAbortAndStart={() => void handleAbortConflictAndStart()}
+      onCancel={() => setConflictSession(null)}
+      isProcessing={isConflictProcessing}
+    />
+  );
 
   const bullRuleCard = (
     <Card>
@@ -190,9 +201,11 @@ export default function CricketSettingsScreen() {
               <WebSettingsSummaryRow label="0点自然終了" value="なし" />
               <WebSettingsSummaryRow label="Bull" value={getBullRuleLabel(bullRule)} />
               <WebSettingsSummaryRow label="Rating" value={ratingStatus} />
+              {startError ? <Text style={styles.startError}>{startError}</Text> : null}
             </WebSettingsSummaryCard>
           }
         />
+        {conflictDialog}
       </ScreenShell>
     );
   }
@@ -230,6 +243,12 @@ export default function CricketSettingsScreen() {
 
       {bullRuleCard}
 
+      {startError ? (
+        <Card muted>
+          <Text style={styles.startError}>{startError}</Text>
+        </Card>
+      ) : null}
+
       <View style={styles.actions}>
         <AppButton
           label={isStarting ? '開始中...' : 'STANDARD CRICKET開始'}
@@ -238,6 +257,7 @@ export default function CricketSettingsScreen() {
         />
         <AppButton label="戻る" onPress={() => router.replace('/game')} variant="secondary" />
       </View>
+      {conflictDialog}
     </ScreenShell>
   );
 }
@@ -274,10 +294,6 @@ function getRatingSubtitle(accountOverview: AccountOverview) {
   return accountOverview.ratingProfile.establishedAt
     ? 'この設定で開始する単独CRICKETはRating更新候補として保存されます。'
     : '初回RatingはEligible MATCH 3件で確定します。確定前の単独CRICKETは対象外です。';
-}
-
-function getErrorMessage(error: unknown) {
-  return error instanceof Error ? error.message : '不明なエラーです。';
 }
 
 function getBullRuleLabel(bullRule: BullRule) {
@@ -318,6 +334,12 @@ const styles = StyleSheet.create({
   },
   actions: {
     gap: 10,
+  },
+  startError: {
+    color: colors.danger,
+    fontSize: 14,
+    fontWeight: '800',
+    lineHeight: 20,
   },
   ratingStatus: {
     marginTop: 12,

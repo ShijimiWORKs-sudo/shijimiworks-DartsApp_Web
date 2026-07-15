@@ -95,7 +95,10 @@ test('existing game logic services are not replaced by settings layout code', ()
   assert.doesNotMatch(zeroOneSettings, /migration 004|user_version = 4/i);
   assert.doesNotMatch(cricketSettings, /migration 004|user_version = 4/i);
   assert.doesNotMatch(matchSettings, /migration 004|user_version = 4/i);
-  assert.match(zeroOneSettings, /ZeroOneActiveGameExistsError/);
-  assert.match(cricketSettings, /CricketActiveGameExistsError/);
-  assert.match(matchSettings, /MatchActiveExistsError/);
+  assert.match(zeroOneSettings, /services\.zeroOne\.startGame/);
+  assert.match(cricketSettings, /services\.cricket\.startGame/);
+  assert.match(matchSettings, /services\.match\.startMatch/);
+  assert.match(zeroOneSettings, /services\.activeSession\.findActiveSession/);
+  assert.match(cricketSettings, /services\.activeSession\.findActiveSession/);
+  assert.match(matchSettings, /services\.activeSession\.findActiveSession/);
 });
