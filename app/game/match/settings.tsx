@@ -8,7 +8,12 @@ import { AccountLocalNotice } from '../../../components/account/AccountLocalNoti
 import { ScreenShell } from '../../../components/ScreenShell';
 import { SectionTitle } from '../../../components/SectionTitle';
 import { useDesktopWebLayout } from '../../../components/web/useDesktopWebLayout';
-import { webGameStyles } from '../../../components/web/WebGameShell';
+import {
+  WebGameSettingsShell,
+  webGameSettingsStyles,
+  WebSettingsSummaryCard,
+  WebSettingsSummaryRow,
+} from '../../../components/web/WebGameSettingsShell';
 import { colors } from '../../../constants/theme';
 import { useAppState } from '../../../contexts/AppStateContext';
 import { useGameDatabase } from '../../../contexts/GameDatabaseContext';
@@ -120,6 +125,133 @@ export default function MatchSettingsScreen() {
     }
   }, [router, services, startMatch]);
 
+  const guestDisplayName = guestName.trim() || 'GUEST 1';
+  const game1FirstThrowLabel = game1FirstThrow === 'owner' ? 'PLAYER 1' : guestDisplayName;
+  const ratingStatus = accountOverview ? 'OWNER Playerのみ候補' : '対象外';
+
+  const gameOneCard = (
+    <Card style={isDesktopWeb && webGameSettingsStyles.settingsGridCard}>
+      <SectionTitle title="GAME1 / CHOICE 01" subtitle="開始点は501または701です。" tone="card" />
+      <View style={styles.segmented}>
+        {startScoreOptions.map((option) => (
+          <OptionButton
+            key={option}
+            label={`${option}`}
+            selected={option === zeroOneStartScore}
+            onPress={() => setZeroOneStartScore(option)}
+          />
+        ))}
+      </View>
+    </Card>
+  );
+
+  const guestCard = (
+    <Card style={isDesktopWeb && webGameSettingsStyles.settingsGridCard}>
+      <SectionTitle title="相手Player" tone="card" />
+      <TextInput
+        value={guestName}
+        onChangeText={setGuestName}
+        placeholder="GUEST 1"
+        placeholderTextColor={colors.textMuted}
+        style={styles.input}
+      />
+    </Card>
+  );
+
+  const firstThrowCard = (
+    <Card style={isDesktopWeb && webGameSettingsStyles.settingsGridCard}>
+      <SectionTitle title="GAME1先攻" tone="card" />
+      <View style={styles.segmented}>
+        <OptionButton
+          label="PLAYER 1"
+          selected={game1FirstThrow === 'owner'}
+          onPress={() => setGame1FirstThrow('owner')}
+        />
+        <OptionButton
+          label={guestDisplayName}
+          selected={game1FirstThrow === 'guest'}
+          onPress={() => setGame1FirstThrow('guest')}
+        />
+      </View>
+      <Text style={styles.note}>GAME2はGAME1と逆のプレイヤーが先攻です。</Text>
+    </Card>
+  );
+
+  const outBullCard = (
+    <Card style={isDesktopWeb && webGameSettingsStyles.settingsGridCard}>
+      <SectionTitle title="Out / Bull" tone="card" />
+      <View style={styles.optionList}>
+        {outRuleOptions.map((option) => (
+          <ChoiceRow
+            key={option.value}
+            label={option.label}
+            selected={outRule === option.value}
+            onPress={() => setOutRule(option.value)}
+          />
+        ))}
+        {bullRuleOptions.map((option) => (
+          <ChoiceRow
+            key={option.value}
+            label={option.label}
+            selected={bullRule === option.value}
+            onPress={() => setBullRule(option.value)}
+          />
+        ))}
+      </View>
+    </Card>
+  );
+
+  if (isDesktopWeb) {
+    return (
+      <ScreenShell showNav={false}>
+        <SectionTitle
+          title="MATCH設定"
+          subtitle="GAME1は01、GAME2はSTANDARD CRICKET、1-1時のみCHOICEへ進みます。"
+        />
+        <WebGameSettingsShell
+          settings={
+            <View style={webGameSettingsStyles.settingsGrid}>
+              {gameOneCard}
+              {guestCard}
+              {firstThrowCard}
+              {outBullCard}
+            </View>
+          }
+          summary={
+            <WebSettingsSummaryCard
+              title="MATCH"
+              actions={
+                <>
+                  <AppButton
+                    label={isStarting ? '開始中...' : 'MATCH開始'}
+                    onPress={() => void handleStart()}
+                    disabled={!isAvailable || isStarting}
+                    variant="match"
+                    style={webGameSettingsStyles.summaryButton}
+                  />
+                  <AppButton
+                    label="戻る"
+                    onPress={() => router.replace('/game')}
+                    variant="secondary"
+                    style={webGameSettingsStyles.summaryButton}
+                  />
+                </>
+              }
+            >
+              <WebSettingsSummaryRow label="対戦" value={`PLAYER 1 vs ${guestDisplayName}`} />
+              <WebSettingsSummaryRow label="GAME1" value={`${zeroOneStartScore}`} />
+              <WebSettingsSummaryRow label="GAME2" value="STANDARD CRICKET" />
+              <WebSettingsSummaryRow label="Out" value={getOutRuleLabel(outRule)} />
+              <WebSettingsSummaryRow label="Bull" value={getBullRuleLabel(bullRule)} />
+              <WebSettingsSummaryRow label="GAME1先攻" value={game1FirstThrowLabel} />
+              <WebSettingsSummaryRow label="Rating" value={ratingStatus} />
+            </WebSettingsSummaryCard>
+          }
+        />
+      </ScreenShell>
+    );
+  }
+
   return (
     <ScreenShell showNav={false}>
       <SectionTitle
@@ -149,84 +281,22 @@ export default function MatchSettingsScreen() {
         </>
       )}
 
-      <Card>
-        <SectionTitle title="GAME1 / CHOICE 01" subtitle="開始点は501または701です。" tone="card" />
-        <View style={styles.segmented}>
-          {startScoreOptions.map((option) => (
-            <OptionButton
-              key={option}
-              label={`${option}`}
-              selected={option === zeroOneStartScore}
-              onPress={() => setZeroOneStartScore(option)}
-            />
-          ))}
-        </View>
-      </Card>
+      {gameOneCard}
 
-      <Card>
-        <SectionTitle title="相手Player" tone="card" />
-        <TextInput
-          value={guestName}
-          onChangeText={setGuestName}
-          placeholder="GUEST 1"
-          placeholderTextColor={colors.textMuted}
-          style={styles.input}
-        />
-      </Card>
+      {guestCard}
 
-      <Card>
-        <SectionTitle title="GAME1先攻" tone="card" />
-        <View style={styles.segmented}>
-          <OptionButton
-            label="PLAYER 1"
-            selected={game1FirstThrow === 'owner'}
-            onPress={() => setGame1FirstThrow('owner')}
-          />
-          <OptionButton
-            label={guestName.trim() || 'GUEST 1'}
-            selected={game1FirstThrow === 'guest'}
-            onPress={() => setGame1FirstThrow('guest')}
-          />
-        </View>
-        <Text style={styles.note}>GAME2はGAME1と逆のプレイヤーが先攻です。</Text>
-      </Card>
+      {firstThrowCard}
 
-      <Card>
-        <SectionTitle title="Out / Bull" tone="card" />
-        <View style={styles.optionList}>
-          {outRuleOptions.map((option) => (
-            <ChoiceRow
-              key={option.value}
-              label={option.label}
-              selected={outRule === option.value}
-              onPress={() => setOutRule(option.value)}
-            />
-          ))}
-          {bullRuleOptions.map((option) => (
-            <ChoiceRow
-              key={option.value}
-              label={option.label}
-              selected={bullRule === option.value}
-              onPress={() => setBullRule(option.value)}
-            />
-          ))}
-        </View>
-      </Card>
+      {outBullCard}
 
-      <View style={[styles.actions, isDesktopWeb && webGameStyles.desktopFooterActions]}>
+      <View style={styles.actions}>
         <AppButton
           label={isStarting ? '開始中...' : 'MATCH開始'}
           onPress={() => void handleStart()}
           disabled={!isAvailable || isStarting}
           variant="match"
-          style={isDesktopWeb && webGameStyles.desktopFooterButton}
         />
-        <AppButton
-          label="戻る"
-          onPress={() => router.replace('/game')}
-          variant="secondary"
-          style={isDesktopWeb && webGameStyles.desktopFooterButton}
-        />
+        <AppButton label="戻る" onPress={() => router.replace('/game')} variant="secondary" />
       </View>
     </ScreenShell>
   );
@@ -284,6 +354,14 @@ function ChoiceRow({
 
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : '不明なエラーです。';
+}
+
+function getOutRuleLabel(outRule: Exclude<ZeroOneOutRule, 'double_out'>) {
+  return outRuleOptions.find((option) => option.value === outRule)?.label ?? outRule;
+}
+
+function getBullRuleLabel(bullRule: BullRule) {
+  return bullRuleOptions.find((option) => option.value === bullRule)?.label ?? bullRule;
 }
 
 const styles = StyleSheet.create({

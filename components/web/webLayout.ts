@@ -21,6 +21,13 @@ export function isDesktopWebLayout(platform: RuntimePlatform, width: number): bo
   return platform === 'web' && width >= WEB_DESKTOP_BREAKPOINT;
 }
 
+export function getWebGameSettingsShellDirection(
+  platform: RuntimePlatform,
+  width: number,
+): 'row' | 'column' {
+  return isDesktopWebLayout(platform, width) ? 'row' : 'column';
+}
+
 export function shouldShowWebTopNavigation(
   platform: RuntimePlatform,
   width: number,

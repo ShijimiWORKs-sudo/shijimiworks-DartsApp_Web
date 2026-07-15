@@ -3,6 +3,7 @@ import { test } from 'node:test';
 
 import {
   getWebContentMaxWidth,
+  getWebGameSettingsShellDirection,
   getWebGameActionColumnWidth,
   isDesktopWebLayout,
   isSupportRouteInWebPrimaryNavigation,
@@ -47,4 +48,12 @@ test('pc game layout keeps a bounded content area and action column', () => {
   assert.equal(getWebGameActionColumnWidth(1024), 420);
   assert.equal(getWebGameActionColumnWidth(1280), 460);
   assert.equal(getWebGameActionColumnWidth(1920), 520);
+});
+
+test('web game settings shell uses row only on desktop web', () => {
+  assert.equal(getWebGameSettingsShellDirection('web', 1024), 'row');
+  assert.equal(getWebGameSettingsShellDirection('web', 1280), 'row');
+  assert.equal(getWebGameSettingsShellDirection('web', 1023), 'column');
+  assert.equal(getWebGameSettingsShellDirection('ios', 1280), 'column');
+  assert.equal(getWebGameSettingsShellDirection('android', 1280), 'column');
 });

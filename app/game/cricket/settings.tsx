@@ -8,7 +8,12 @@ import { AccountLocalNotice } from '../../../components/account/AccountLocalNoti
 import { ScreenShell } from '../../../components/ScreenShell';
 import { SectionTitle } from '../../../components/SectionTitle';
 import { useDesktopWebLayout } from '../../../components/web/useDesktopWebLayout';
-import { webGameStyles } from '../../../components/web/WebGameShell';
+import {
+  WebGameSettingsShell,
+  webGameSettingsStyles,
+  WebSettingsSummaryCard,
+  WebSettingsSummaryRow,
+} from '../../../components/web/WebGameSettingsShell';
 import { colors } from '../../../constants/theme';
 import { useAppState } from '../../../contexts/AppStateContext';
 import { useGameDatabase } from '../../../contexts/GameDatabaseContext';
@@ -131,6 +136,67 @@ export default function CricketSettingsScreen() {
     }
   }, [router, services, startCricket]);
 
+  const ratingStatus = accountOverview?.ratingProfile.establishedAt ? '候補対象' : '対象外';
+
+  const bullRuleCard = (
+    <Card>
+      <SectionTitle title="Bull設定" subtitle="前回のCRICKET設定を初期値にします。" tone="card" />
+      <View style={styles.optionList}>
+        {bullRuleOptions.map((option) => (
+          <ChoiceRow
+            key={option.value}
+            label={option.label}
+            helper={option.helper}
+            selected={option.value === bullRule}
+            onPress={() => setBullRule(option.value)}
+          />
+        ))}
+      </View>
+    </Card>
+  );
+
+  if (isDesktopWeb) {
+    return (
+      <ScreenShell showNav={false}>
+        <SectionTitle
+          title="STANDARD CRICKET設定"
+          subtitle="単独STANDARD CRICKETをDBへ保存しながら開始します。"
+        />
+        <WebGameSettingsShell
+          settings={<View style={webGameSettingsStyles.settingsStack}>{bullRuleCard}</View>}
+          summary={
+            <WebSettingsSummaryCard
+              title="STANDARD CRICKET"
+              actions={
+                <>
+                  <AppButton
+                    label={isStarting ? '開始中...' : 'STANDARD CRICKET開始'}
+                    onPress={() => void handleStart()}
+                    disabled={!isAvailable || isStarting}
+                    variant="cricket"
+                    style={webGameSettingsStyles.summaryButton}
+                  />
+                  <AppButton
+                    label="戻る"
+                    onPress={() => router.replace('/game')}
+                    variant="secondary"
+                    style={webGameSettingsStyles.summaryButton}
+                  />
+                </>
+              }
+            >
+              <WebSettingsSummaryRow label="対象" value="20 / 19 / 18 / 17 / 16 / 15 / BULL" />
+              <WebSettingsSummaryRow label="最大ラウンド" value="15" />
+              <WebSettingsSummaryRow label="0点自然終了" value="なし" />
+              <WebSettingsSummaryRow label="Bull" value={getBullRuleLabel(bullRule)} />
+              <WebSettingsSummaryRow label="Rating" value={ratingStatus} />
+            </WebSettingsSummaryCard>
+          }
+        />
+      </ScreenShell>
+    );
+  }
+
   return (
     <ScreenShell showNav={false}>
       <SectionTitle
@@ -162,34 +228,15 @@ export default function CricketSettingsScreen() {
         </>
       )}
 
-      <Card>
-        <SectionTitle title="Bull設定" subtitle="前回のCRICKET設定を初期値にします。" tone="card" />
-        <View style={styles.optionList}>
-          {bullRuleOptions.map((option) => (
-            <ChoiceRow
-              key={option.value}
-              label={option.label}
-              helper={option.helper}
-              selected={option.value === bullRule}
-              onPress={() => setBullRule(option.value)}
-            />
-          ))}
-        </View>
-      </Card>
+      {bullRuleCard}
 
-      <View style={[styles.actions, isDesktopWeb && webGameStyles.desktopFooterActions]}>
+      <View style={styles.actions}>
         <AppButton
           label={isStarting ? '開始中...' : 'STANDARD CRICKET開始'}
           onPress={() => void handleStart()}
           disabled={!isAvailable || isStarting}
-          style={isDesktopWeb && webGameStyles.desktopFooterButton}
         />
-        <AppButton
-          label="戻る"
-          onPress={() => router.replace('/game')}
-          variant="secondary"
-          style={isDesktopWeb && webGameStyles.desktopFooterButton}
-        />
+        <AppButton label="戻る" onPress={() => router.replace('/game')} variant="secondary" />
       </View>
     </ScreenShell>
   );
@@ -231,6 +278,10 @@ function getRatingSubtitle(accountOverview: AccountOverview) {
 
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : '不明なエラーです。';
+}
+
+function getBullRuleLabel(bullRule: BullRule) {
+  return bullRuleOptions.find((option) => option.value === bullRule)?.label ?? bullRule;
 }
 
 const styles = StyleSheet.create({

@@ -8,7 +8,12 @@ import { AccountLocalNotice } from '../../../components/account/AccountLocalNoti
 import { ScreenShell } from '../../../components/ScreenShell';
 import { SectionTitle } from '../../../components/SectionTitle';
 import { useDesktopWebLayout } from '../../../components/web/useDesktopWebLayout';
-import { webGameStyles } from '../../../components/web/WebGameShell';
+import {
+  WebGameSettingsShell,
+  webGameSettingsStyles,
+  WebSettingsSummaryCard,
+  WebSettingsSummaryRow,
+} from '../../../components/web/WebGameSettingsShell';
 import { colors } from '../../../constants/theme';
 import { useAppState } from '../../../contexts/AppStateContext';
 import { useGameDatabase } from '../../../contexts/GameDatabaseContext';
@@ -137,6 +142,105 @@ export default function ZeroOneSettingsScreen() {
     }
   }, [router, services, startZeroOne]);
 
+  const ratingStatus = accountOverview ? getZeroOneRatingStatus(accountOverview) : '対象外';
+
+  const startScoreCard = (
+    <Card>
+      <SectionTitle title="開始点" subtitle="301 / 501 / 701 / 901から選択します。" tone="card" />
+      <View style={styles.segmented}>
+        {startScoreOptions.map((option) => (
+          <OptionButton
+            key={option}
+            label={`${option}`}
+            selected={option === startScore}
+            onPress={() => setStartScore(option)}
+          />
+        ))}
+      </View>
+    </Card>
+  );
+
+  const outRuleCard = (
+    <Card style={isDesktopWeb && webGameSettingsStyles.settingsGridCard}>
+      <SectionTitle title="Out" subtitle="DOUBLE OUTはPhase 3では扱いません。" tone="card" />
+      <View style={styles.optionList}>
+        {outRuleOptions.map((option) => (
+          <ChoiceRow
+            key={option.value}
+            label={option.label}
+            helper={option.helper}
+            selected={option.value === outRule}
+            onPress={() => setOutRule(option.value)}
+          />
+        ))}
+      </View>
+    </Card>
+  );
+
+  const bullRuleCard = (
+    <Card style={isDesktopWeb && webGameSettingsStyles.settingsGridCard}>
+      <SectionTitle title="Bull" subtitle="前回の01設定を初期値にします。" tone="card" />
+      <View style={styles.optionList}>
+        {bullRuleOptions.map((option) => (
+          <ChoiceRow
+            key={option.value}
+            label={option.label}
+            helper={option.helper}
+            selected={option.value === bullRule}
+            onPress={() => setBullRule(option.value)}
+          />
+        ))}
+      </View>
+    </Card>
+  );
+
+  if (isDesktopWeb) {
+    return (
+      <ScreenShell showNav={false}>
+        <SectionTitle title="01 GAME設定" subtitle="単独01をDBへ保存しながら開始します。" />
+        <WebGameSettingsShell
+          settings={
+            <View style={webGameSettingsStyles.settingsStack}>
+              {startScoreCard}
+              <View style={webGameSettingsStyles.settingsGrid}>
+                {outRuleCard}
+                {bullRuleCard}
+              </View>
+            </View>
+          }
+          summary={
+            <WebSettingsSummaryCard
+              title="01 GAME"
+              actions={
+                <>
+                  <AppButton
+                    label={isStarting ? '開始中...' : '01 GAME開始'}
+                    onPress={() => void handleStart()}
+                    disabled={!isAvailable || isStarting}
+                    variant="zeroOne"
+                    style={webGameSettingsStyles.summaryButton}
+                  />
+                  <AppButton
+                    label="戻る"
+                    onPress={() => router.replace('/game')}
+                    variant="secondary"
+                    style={webGameSettingsStyles.summaryButton}
+                  />
+                </>
+              }
+            >
+              <WebSettingsSummaryRow label="開始点" value={`${startScore}`} />
+              <WebSettingsSummaryRow label="Out" value={getOutRuleLabel(outRule)} />
+              <WebSettingsSummaryRow label="Bull" value={getBullRuleLabel(bullRule)} />
+              <WebSettingsSummaryRow label="最大ラウンド" value="15" />
+              <WebSettingsSummaryRow label="Rating" value={ratingStatus} />
+            </WebSettingsSummaryCard>
+          }
+        />
+      </ScreenShell>
+    );
+  }
+
   return (
     <ScreenShell showNav={false}>
       <SectionTitle title="01 GAME設定" subtitle="単独01をDBへ保存しながら開始します。" />
@@ -163,63 +267,19 @@ export default function ZeroOneSettingsScreen() {
         </>
       )}
 
-      <Card>
-        <SectionTitle title="開始点" subtitle="301 / 501 / 701 / 901から選択します。" tone="card" />
-        <View style={styles.segmented}>
-          {startScoreOptions.map((option) => (
-            <OptionButton
-              key={option}
-              label={`${option}`}
-              selected={option === startScore}
-              onPress={() => setStartScore(option)}
-            />
-          ))}
-        </View>
-      </Card>
+      {startScoreCard}
 
-      <Card>
-        <SectionTitle title="Out設定" subtitle="DOUBLE OUTはPhase 3では扱いません。" tone="card" />
-        <View style={styles.optionList}>
-          {outRuleOptions.map((option) => (
-            <ChoiceRow
-              key={option.value}
-              label={option.label}
-              helper={option.helper}
-              selected={option.value === outRule}
-              onPress={() => setOutRule(option.value)}
-            />
-          ))}
-        </View>
-      </Card>
+      {outRuleCard}
 
-      <Card>
-        <SectionTitle title="Bull設定" subtitle="前回の01設定を初期値にします。" tone="card" />
-        <View style={styles.optionList}>
-          {bullRuleOptions.map((option) => (
-            <ChoiceRow
-              key={option.value}
-              label={option.label}
-              helper={option.helper}
-              selected={option.value === bullRule}
-              onPress={() => setBullRule(option.value)}
-            />
-          ))}
-        </View>
-      </Card>
+      {bullRuleCard}
 
-      <View style={[styles.actions, isDesktopWeb && webGameStyles.desktopFooterActions]}>
+      <View style={styles.actions}>
         <AppButton
           label={isStarting ? '開始中...' : '01 GAME開始'}
           onPress={() => void handleStart()}
           disabled={!isAvailable || isStarting}
-          style={isDesktopWeb && webGameStyles.desktopFooterButton}
         />
-        <AppButton
-          label="戻る"
-          onPress={() => router.replace('/game')}
-          variant="secondary"
-          style={isDesktopWeb && webGameStyles.desktopFooterButton}
-        />
+        <AppButton label="戻る" onPress={() => router.replace('/game')} variant="secondary" />
       </View>
     </ScreenShell>
   );
@@ -280,6 +340,14 @@ function ChoiceRow({
 
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : '不明なエラーです。';
+}
+
+function getOutRuleLabel(outRule: ZeroOneOutRule) {
+  return outRuleOptions.find((option) => option.value === outRule)?.label ?? outRule;
+}
+
+function getBullRuleLabel(bullRule: BullRule) {
+  return bullRuleOptions.find((option) => option.value === bullRule)?.label ?? bullRule;
 }
 
 const styles = StyleSheet.create({
