@@ -1,5 +1,4 @@
-import { useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { useRouter } from 'expo-router';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { AppButton } from '../../components/AppButton';
@@ -12,76 +11,17 @@ import { SectionTitle } from '../../components/SectionTitle';
 import { useDesktopWebLayout } from '../../components/web/useDesktopWebLayout';
 import { webGameStyles } from '../../components/web/WebGameShell';
 import { colors } from '../../constants/theme';
-import { useAppState } from '../../contexts/AppStateContext';
-import { useGameDatabase } from '../../contexts/GameDatabaseContext';
-import type { AccountServicePort } from '../../features/account/application/AccountServicePort';
-import type { AccountOverview } from '../../features/account/domain';
-
-type AccountAppState = ReturnType<typeof useAppState> & {
-  activeAccountId?: string | null;
-};
-
-type ServicesWithAccount = {
-  account?: AccountServicePort;
-};
+import { useActiveAccountOverview } from '../../hooks/useActiveAccountOverview';
 
 export default function AccountRatingStatusScreen() {
   const router = useRouter();
-  const appState = useAppState() as AccountAppState;
-  const { services } = useGameDatabase();
   const isDesktopWeb = useDesktopWebLayout();
-  const accountService = (services as ServicesWithAccount | null)?.account ?? null;
-  const ratingService = services?.rating ?? null;
-  const activeAccountId = appState.activeAccountId ?? null;
-  const [overview, setOverview] = useState<AccountOverview | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-
-  useFocusEffect(
-    useCallback(() => {
-      let mounted = true;
-
-      async function loadAccount() {
-        setIsLoading(true);
-        setErrorMessage(null);
-
-        if (!accountService) {
-          if (mounted) {
-            setIsLoading(false);
-          }
-          return;
-        }
-
-        try {
-          await ratingService?.processPending();
-          const nextOverview = await accountService.getActiveAccount(activeAccountId);
-          if (!mounted) {
-            return;
-          }
-
-          if (!nextOverview) {
-            router.replace('/account/register');
-            return;
-          }
-
-          setOverview(nextOverview);
-        } catch (error) {
-          if (mounted) {
-            setErrorMessage(getErrorMessage(error));
-          }
-        } finally {
-          if (mounted) {
-            setIsLoading(false);
-          }
-        }
-      }
-
-      void loadAccount();
-      return () => {
-        mounted = false;
-      };
-    }, [accountService, activeAccountId, ratingService, router]),
-  );
+  const {
+    errorMessage,
+    isResolving,
+    overview,
+    status: accountStatus,
+  } = useActiveAccountOverview({ processPendingRating: true });
 
   return (
     <ScreenShell>
@@ -89,7 +29,7 @@ export default function AccountRatingStatusScreen() {
 
       <AccountLocalNotice />
 
-      {!accountService ? (
+      {accountStatus === 'database_loading' ? (
         <Card muted>
           <Text style={styles.message}>Accountサービスの接続を待っています。</Text>
         </Card>
@@ -108,7 +48,7 @@ export default function AccountRatingStatusScreen() {
       ) : (
         <Card muted>
           <Text style={styles.message}>
-            {isLoading ? 'Rating状態を読み込んでいます。' : 'Account登録が必要です。'}
+            {getMissingRatingStatusMessage(isResolving, errorMessage)}
           </Text>
         </Card>
       )}
@@ -134,8 +74,14 @@ export default function AccountRatingStatusScreen() {
   );
 }
 
-function getErrorMessage(error: unknown) {
-  return error instanceof Error ? error.message : '不明なエラーです。';
+function getMissingRatingStatusMessage(isResolving: boolean, errorMessage: string | null) {
+  if (isResolving) {
+    return 'Rating状態を読み込んでいます。';
+  }
+  if (errorMessage) {
+    return 'Rating状態を読み込めませんでした。';
+  }
+  return 'Account登録が必要です。';
 }
 
 const styles = StyleSheet.create({

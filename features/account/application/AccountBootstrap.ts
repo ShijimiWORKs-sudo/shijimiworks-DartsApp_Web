@@ -47,12 +47,22 @@ export async function resolveAccountBootstrap(
         options,
       );
 
-      if (overview) {
+      if (overview && isRegisteredOverview(overview)) {
         return {
-          status: isRegisteredOverview(overview) ? 'registered' : 'unregistered',
+          status: 'registered',
           activeAccountId,
           overview,
           shouldPersistActiveAccountId: false,
+        };
+      }
+
+      const registered = await findRegisteredAccount(accountService, options);
+      if (registered) {
+        return {
+          status: 'registered',
+          activeAccountId: registered.account.id,
+          overview: registered,
+          shouldPersistActiveAccountId: registered.account.id !== activeAccountId,
         };
       }
 
@@ -64,10 +74,7 @@ export async function resolveAccountBootstrap(
       };
     }
 
-    const registered = await withSqliteLockRetry(
-      () => accountService.getActiveAccount(null),
-      options,
-    );
+    const registered = await findRegisteredAccount(accountService, options);
 
     if (registered) {
       return {
@@ -97,6 +104,13 @@ export async function resolveAccountBootstrap(
 
     throw error;
   }
+}
+
+async function findRegisteredAccount(
+  accountService: AccountServicePort,
+  options: AccountBootstrapOptions,
+) {
+  return withSqliteLockRetry(() => accountService.getActiveAccount(null), options);
 }
 
 export function isTemporarySqliteLockError(error: unknown): boolean {

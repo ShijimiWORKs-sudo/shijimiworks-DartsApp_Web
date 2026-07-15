@@ -22,11 +22,11 @@ import { levelLabels } from '../constants/levels';
 import { colors } from '../constants/theme';
 import { useAppState } from '../contexts/AppStateContext';
 import { useGameDatabase } from '../contexts/GameDatabaseContext';
-import type { AccountOverview } from '../features/account/domain';
 import type { CountUpGameState } from '../features/game/domain/countUp';
 import type { CricketGameState } from '../features/game/domain/cricket';
 import type { MatchState } from '../features/game/domain/match';
 import type { ZeroOneGameState } from '../features/game/domain/zeroOne';
+import { useActiveAccountOverview } from '../hooks/useActiveAccountOverview';
 import { calculateAnalysisSummary } from '../utils/analyzePracticeRecords';
 import { recommendPracticeMenus } from '../utils/recommendPracticeMenus';
 
@@ -62,9 +62,8 @@ export default function HomeScreen() {
   const isDesktopWeb = useDesktopWebLayout();
   const [activeGame, setActiveGame] = useState<ActiveGame | null>(null);
   const [recentResults, setRecentResults] = useState<RecentGame[]>([]);
-  const [accountOverview, setAccountOverview] = useState<AccountOverview | null>(null);
+  const { overview: accountOverview } = useActiveAccountOverview({ processPendingRating: true });
   const {
-    activeAccountId,
     isLoading,
     profile,
     records,
@@ -91,8 +90,6 @@ export default function HomeScreen() {
           return;
         }
 
-        await services.rating.processPending();
-
         const [
           countUp,
           zeroOne,
@@ -102,7 +99,6 @@ export default function HomeScreen() {
           recentZeroOne,
           recentCricket,
           recentMatch,
-          account,
         ] = await Promise.all([
           services.countUp.getActiveGame(),
           services.zeroOne.getActiveGame(),
@@ -112,7 +108,6 @@ export default function HomeScreen() {
           services.zeroOne.listRecentResults(3),
           services.cricket.listRecentResults(3),
           services.match.listRecentResults(3),
-          services.account.getActiveAccount(activeAccountId),
         ]);
         if (mounted) {
           setActiveGame(
@@ -137,7 +132,6 @@ export default function HomeScreen() {
               ...recentCountUp.map((game) => ({ mode: 'count_up' as const, game })),
             ].slice(0, 5),
           );
-          setAccountOverview(account);
         }
       }
 
@@ -145,7 +139,7 @@ export default function HomeScreen() {
       return () => {
         mounted = false;
       };
-    }, [activeAccountId, services]),
+    }, [services]),
   );
 
   if (isDesktopWeb) {

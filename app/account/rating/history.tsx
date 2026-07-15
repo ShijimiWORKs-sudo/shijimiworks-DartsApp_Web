@@ -16,17 +16,21 @@ import { SectionTitle } from '../../../components/SectionTitle';
 import { useDesktopWebLayout } from '../../../components/web/useDesktopWebLayout';
 import { webGameStyles } from '../../../components/web/WebGameShell';
 import { colors } from '../../../constants/theme';
-import { useAppState } from '../../../contexts/AppStateContext';
 import { useGameDatabase } from '../../../contexts/GameDatabaseContext';
 import type { RatingSnapshotHistoryItem } from '../../../features/game/application/ports';
+import { useActiveAccountOverview } from '../../../hooks/useActiveAccountOverview';
 
 export default function AccountRatingHistoryScreen() {
   const router = useRouter();
   const isDesktopWeb = useDesktopWebLayout();
-  const { activeAccountId } = useAppState();
   const { services } = useGameDatabase();
+  const {
+    errorMessage: accountErrorMessage,
+    isResolving: isAccountResolving,
+    overview,
+  } = useActiveAccountOverview({ processPendingRating: true });
   const [history, setHistory] = useState<RatingSnapshotHistoryItem[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isHistoryLoading, setIsHistoryLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   useFocusEffect(
@@ -34,20 +38,23 @@ export default function AccountRatingHistoryScreen() {
       let mounted = true;
 
       async function loadHistory() {
-        setIsLoading(true);
+        if (!services || !overview) {
+          setHistory([]);
+          setIsHistoryLoading(false);
+          return;
+        }
+
+        setIsHistoryLoading(true);
         setErrorMessage(null);
         try {
-          await services?.rating.processPending();
-          const account = await services?.account.getActiveAccount(activeAccountId);
-          const snapshots =
-            account && services ? await services.rating.listSnapshots(account.account.id) : [];
+          const snapshots = await services.rating.listSnapshots(overview.account.id);
           if (mounted) {
             setHistory(snapshots);
           }
         } catch (error) {
           if (mounted) setErrorMessage(getErrorMessage(error));
         } finally {
-          if (mounted) setIsLoading(false);
+          if (mounted) setIsHistoryLoading(false);
         }
       }
 
@@ -55,8 +62,11 @@ export default function AccountRatingHistoryScreen() {
       return () => {
         mounted = false;
       };
-    }, [activeAccountId, services]),
+    }, [overview, services]),
   );
+
+  const isLoading = isAccountResolving || isHistoryLoading;
+  const combinedErrorMessage = errorMessage ?? accountErrorMessage;
 
   return (
     <ScreenShell>
@@ -64,11 +74,7 @@ export default function AccountRatingHistoryScreen() {
 
       {history.length === 0 ? (
         <Card muted>
-          <Text style={styles.message}>
-            {isLoading
-              ? 'Rating履歴を読み込んでいます。'
-              : 'Rating履歴はまだありません。\nEligible MATCHを完了すると、ここに履歴が表示されます。'}
-          </Text>
+          <Text style={styles.message}>{getEmptyMessage(isLoading, Boolean(overview))}</Text>
         </Card>
       ) : (
         <View style={styles.historyList}>
@@ -103,7 +109,7 @@ export default function AccountRatingHistoryScreen() {
         </View>
       )}
 
-      {errorMessage ? <Text style={styles.error}>{errorMessage}</Text> : null}
+      {combinedErrorMessage ? <Text style={styles.error}>{combinedErrorMessage}</Text> : null}
 
       <View style={[styles.actions, isDesktopWeb && webGameStyles.desktopFooterActions]}>
         <AppButton
@@ -151,6 +157,16 @@ function formatDelta(deltaMilli: number | null) {
 
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : '不明なエラーです。';
+}
+
+function getEmptyMessage(isLoading: boolean, hasAccount: boolean) {
+  if (isLoading) {
+    return 'Rating履歴を読み込んでいます。';
+  }
+  if (!hasAccount) {
+    return 'Account登録後にRating履歴を表示します。';
+  }
+  return 'Rating履歴はまだありません。\nEligible MATCHを完了すると、ここに履歴が表示されます。';
 }
 
 const styles = StyleSheet.create({

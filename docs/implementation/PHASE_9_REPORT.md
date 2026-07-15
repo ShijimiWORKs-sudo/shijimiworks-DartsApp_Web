@@ -23,6 +23,8 @@ Implemented:
 - 01 / STANDARD CRICKET / MATCH result screen Rating result display based on Evaluation and Snapshot
 - COUNT-UP result screen Rating対象外 display
 - Source revision recalculation with Evaluation invalidation, Snapshot invalidation, chronological replay, and Profile restoration
+- Shared active Account resolution for Home, Account profile, Rating status, Rating detail, and Rating history
+- Direct `/account/rating` and `/account/rating/history` access restores a registered local Account before showing unregistered copy
 
 Not implemented in this phase:
 
@@ -108,6 +110,15 @@ Game result screens now display Rating result status by source Evaluation:
 - MATCH result: applied / excluded / processing / not_target
 - COUNT-UP result: always Rating対象外
 
+Active Account resolution:
+
+- Waits for AppState loading and Game DB initialization before resolving Account
+- Uses the same `resolveAccountBootstrap` path from Home, Account profile, Rating status, Rating detail, and Rating history
+- Repairs `activeAccountId = null` by restoring the registered OWNER Account
+- Repairs a stale `activeAccountId` by falling back to a registered OWNER Account
+- Does not auto-select disabled or deleted Accounts for Rating ownership
+- Shows unregistered copy only after Account resolution confirms that no registered Account exists
+
 ## Tests
 
 Added coverage:
@@ -130,7 +141,12 @@ Added coverage:
 - Source revision recalculation invalidates older revisions and Snapshots
 - Recalculation replays latest Evaluations and keeps Profile aligned with the final Snapshot
 - Candidate-disabled latest revision is excluded and remaining sources are replayed
+- Account bootstrap repairs null/stale `activeAccountId`
+- Disabled Account is not auto-selected for Rating ownership
+- Rating detail/history routes use shared active Account resolution
+- Rating detail keeps the history button enabled for registered unmeasured Accounts
+- Rating history distinguishes loading, no Account, and 0 Snapshot states
 
 Final test suite result during implementation:
 
-- `npm.cmd test`: 259 passed
+- `npm.cmd test`: 263 passed

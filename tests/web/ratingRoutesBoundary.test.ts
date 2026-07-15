@@ -12,14 +12,19 @@ function readText(relativePath: string): string {
 test('Rating detail and history routes are present', () => {
   assert.equal(existsSync(path.join(rootDir, 'app/account/rating/index.tsx')), true);
   assert.equal(existsSync(path.join(rootDir, 'app/account/rating/history.tsx')), true);
+  assert.equal(existsSync(path.join(rootDir, 'hooks/useActiveAccountOverview.ts')), true);
 
   const detail = readText('app/account/rating/index.tsx');
   const history = readText('app/account/rating/history.tsx');
 
   assert.match(detail, /DartsApp Rating/);
   assert.match(detail, /Rating履歴を見る/);
+  assert.match(detail, /getEligibleMatchProgress/);
+  assert.match(detail, /未確定/);
   assert.match(history, /Rating履歴/);
   assert.match(history, /listSnapshots/);
+  assert.match(history, /Rating履歴を読み込んでいます。/);
+  assert.match(history, /Rating履歴はまだありません。/);
 });
 
 test('Rating detail links are available from Home, Game Hub and Account screens', () => {
@@ -32,6 +37,29 @@ test('Rating detail links are available from Home, Game Hub and Account screens'
   assert.match(ratingStatusCard, /Rating詳細を見る/);
   assert.match(ratingStatusCard, /Rating履歴を見る/);
   assert.match(profile, /RatingStatusCard/);
+});
+
+test('Home, Account profile and Rating routes share active Account resolution', () => {
+  const hook = readText('hooks/useActiveAccountOverview.ts');
+  assert.match(hook, /resolveAccountBootstrap/);
+  assert.match(hook, /setActiveAccountId/);
+  assert.match(hook, /processPendingRating/);
+
+  for (const routeFile of [
+    'app/home.tsx',
+    'app/account/profile.tsx',
+    'app/account/rating-status.tsx',
+    'app/account/rating/index.tsx',
+    'app/account/rating/history.tsx',
+  ]) {
+    const source = readText(routeFile);
+    assert.match(source, /useActiveAccountOverview/, routeFile);
+  }
+
+  const ratingDetail = readText('app/account/rating/index.tsx');
+  const ratingHistory = readText('app/account/rating/history.tsx');
+  assert.doesNotMatch(ratingDetail, /getActiveAccount\(activeAccountId\)/);
+  assert.doesNotMatch(ratingHistory, /getActiveAccount\(activeAccountId\)/);
 });
 
 test('game result screens use source Rating results instead of only profile state', () => {

@@ -1,5 +1,4 @@
-import { useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { useRouter } from 'expo-router';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { AppButton } from '../../../components/AppButton';
@@ -9,6 +8,7 @@ import {
   formatEvaluatedAt,
   formatRatingIndex,
   formatRatingTenths,
+  getEligibleMatchProgress,
   getRatingMeasurementLabel,
 } from '../../../components/account/accountUiModel';
 import { ScreenShell } from '../../../components/ScreenShell';
@@ -16,44 +16,14 @@ import { SectionTitle } from '../../../components/SectionTitle';
 import { useDesktopWebLayout } from '../../../components/web/useDesktopWebLayout';
 import { webGameStyles } from '../../../components/web/WebGameShell';
 import { colors } from '../../../constants/theme';
-import { useAppState } from '../../../contexts/AppStateContext';
-import { useGameDatabase } from '../../../contexts/GameDatabaseContext';
-import type { AccountOverview } from '../../../features/account/domain';
+import { useActiveAccountOverview } from '../../../hooks/useActiveAccountOverview';
 
 export default function AccountRatingScreen() {
   const router = useRouter();
   const isDesktopWeb = useDesktopWebLayout();
-  const { activeAccountId } = useAppState();
-  const { services } = useGameDatabase();
-  const [overview, setOverview] = useState<AccountOverview | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-
-  useFocusEffect(
-    useCallback(() => {
-      let mounted = true;
-
-      async function loadRating() {
-        setIsLoading(true);
-        setErrorMessage(null);
-        try {
-          await services?.rating.processPending();
-          const nextOverview = await services?.account.getActiveAccount(activeAccountId);
-          if (!mounted) return;
-          setOverview(nextOverview ?? null);
-        } catch (error) {
-          if (mounted) setErrorMessage(getErrorMessage(error));
-        } finally {
-          if (mounted) setIsLoading(false);
-        }
-      }
-
-      void loadRating();
-      return () => {
-        mounted = false;
-      };
-    }, [activeAccountId, services]),
-  );
+  const { errorMessage, isResolving, overview } = useActiveAccountOverview({
+    processPendingRating: true,
+  });
 
   const profile = overview?.ratingProfile ?? null;
 
@@ -63,9 +33,7 @@ export default function AccountRatingScreen() {
 
       {!profile ? (
         <Card muted>
-          <Text style={styles.message}>
-            {isLoading ? 'Ratingを読み込んでいます。' : 'Account登録後にRating状態を表示します。'}
-          </Text>
+          <Text style={styles.message}>{getMissingRatingMessage(isResolving, errorMessage)}</Text>
         </Card>
       ) : (
         <>
@@ -82,7 +50,10 @@ export default function AccountRatingScreen() {
                 value={getRatingMeasurementLabel(profile.measurementStatus)}
               />
               <Metric label="Confidence" value={formatConfidence(profile.confidenceBp)} />
-              <Metric label="Eligible MATCH" value={`${profile.eligibleMatchCount}`} />
+              <Metric
+                label="Eligible MATCH"
+                value={getEligibleMatchProgress(profile.eligibleMatchCount)}
+              />
               <Metric label="単独01" value={`${profile.eligibleStandaloneZeroOneCount}`} />
               <Metric label="単独CRICKET" value={`${profile.eligibleStandaloneCricketCount}`} />
             </View>
@@ -91,12 +62,15 @@ export default function AccountRatingScreen() {
           <Card>
             <SectionTitle title="Index" subtitle="Rating Engine v2の内部指標です。" tone="card" />
             <View style={styles.detailRows}>
-              <DetailRow label="01 Index" value={formatRatingIndex(profile.zeroOneIndexMilli)} />
+              <DetailRow label="01 Index" value={formatIndexForDetail(profile.zeroOneIndexMilli)} />
               <DetailRow
                 label="Cricket Index"
-                value={formatRatingIndex(profile.cricketIndexMilli)}
+                value={formatIndexForDetail(profile.cricketIndexMilli)}
               />
-              <DetailRow label="Match Index" value={formatRatingIndex(profile.matchIndexMilli)} />
+              <DetailRow
+                label="Match Index"
+                value={formatIndexForDetail(profile.matchIndexMilli)}
+              />
               <DetailRow label="established_at" value={profile.establishedAt ?? '-'} />
               <DetailRow label="最終評価日時" value={formatEvaluatedAt(profile.lastEvaluatedAt)} />
             </View>
@@ -142,8 +116,18 @@ function DetailRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-function getErrorMessage(error: unknown) {
-  return error instanceof Error ? error.message : '不明なエラーです。';
+function formatIndexForDetail(indexMilli: number | null) {
+  return indexMilli === null ? '未確定' : formatRatingIndex(indexMilli);
+}
+
+function getMissingRatingMessage(isResolving: boolean, errorMessage: string | null) {
+  if (isResolving) {
+    return 'Ratingを読み込んでいます。';
+  }
+  if (errorMessage) {
+    return 'Rating状態を読み込めませんでした。';
+  }
+  return 'Account登録後にRating状態を表示します。';
 }
 
 const styles = StyleSheet.create({

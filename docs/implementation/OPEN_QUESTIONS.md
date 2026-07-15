@@ -1,6 +1,14 @@
 # Open Questions
 
-現在、Phase 9に関する未解決事項はありません。
+現在、Phase 9に関する未解決事項は1件あります。
+
+## 未解決: 複数有効Accountの選択UI
+
+- 現状のDartsAppは端末内のRating所有者を1 Account前提で扱う
+- `activeAccountId = null` または古いIDの場合、有効なOWNER Accountが1件なら自動復元する
+- `activeAccountId`がdisabled/deleted相当の場合、そのAccountはRating所有者として自動選択しない
+- 有効なOWNER Accountが複数存在する場合の選択UIと優先順位は未設計
+- 複数Account対応フェーズで、Account選択画面または明示的な切替UIを定義する
 
 ## 解決済み: Active MATCH uniqueness
 

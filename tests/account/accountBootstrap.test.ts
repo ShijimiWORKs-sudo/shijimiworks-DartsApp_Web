@@ -37,6 +37,54 @@ test('bootstrap clears activeAccountId only when the account is confirmed missin
   assert.equal(result.shouldPersistActiveAccountId, true);
 });
 
+test('bootstrap repairs missing activeAccountId to a registered owner account', async () => {
+  const overview = createOverview('account-restored');
+  const result = await resolveAccountBootstrap(
+    createService({
+      activeOverview: overview,
+      byId: { 'stale-account': null },
+    }),
+    'stale-account',
+  );
+
+  assert.equal(result.status, 'registered');
+  assert.equal(result.activeAccountId, 'account-restored');
+  assert.equal(result.overview?.account.displayName, 'Player One');
+  assert.equal(result.shouldPersistActiveAccountId, true);
+});
+
+test('bootstrap does not auto-select disabled accounts for Rating ownership', async () => {
+  const disabled = createOverview('disabled-account', 'disabled');
+  const result = await resolveAccountBootstrap(
+    createService({
+      byId: { 'disabled-account': disabled },
+    }),
+    'disabled-account',
+  );
+
+  assert.equal(result.status, 'unregistered');
+  assert.equal(result.activeAccountId, null);
+  assert.equal(result.overview, null);
+  assert.equal(result.shouldPersistActiveAccountId, true);
+});
+
+test('bootstrap falls back from disabled activeAccountId to a registered owner account', async () => {
+  const disabled = createOverview('disabled-account', 'disabled');
+  const registered = createOverview('registered-account');
+  const result = await resolveAccountBootstrap(
+    createService({
+      activeOverview: registered,
+      byId: { 'disabled-account': disabled },
+    }),
+    'disabled-account',
+  );
+
+  assert.equal(result.status, 'registered');
+  assert.equal(result.activeAccountId, 'registered-account');
+  assert.equal(result.overview?.account.status, 'local_registered');
+  assert.equal(result.shouldPersistActiveAccountId, true);
+});
+
 test('bootstrap keeps activeAccountId on SQLITE_BUSY or SQLITE_LOCKED', async () => {
   const result = await resolveAccountBootstrap(
     createService({
@@ -125,14 +173,17 @@ function createService({
   };
 }
 
-function createOverview(accountId: string): AccountOverview {
+function createOverview(
+  accountId: string,
+  status: AccountOverview['account']['status'] = 'local_registered',
+): AccountOverview {
   return {
     account: {
       id: accountId,
       userName: 'player_01',
       displayName: 'Player One',
       emailNormalized: null,
-      status: 'local_registered',
+      status,
       authProvider: 'local',
       registeredAt: '2026-07-13T00:00:00.000Z',
       verifiedAt: null,
