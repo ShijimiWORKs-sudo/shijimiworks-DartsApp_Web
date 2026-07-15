@@ -2,8 +2,15 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import { createAccountService } from '../../features/account';
-import { MatchActiveExistsError, MatchGameService } from '../../features/game/application/services';
-import { createGameRepositories } from '../../features/game/infrastructure/sqlite/repositories';
+import {
+  MatchActiveExistsError,
+  MatchGameService,
+  RatingApplicationService,
+} from '../../features/game/application/services';
+import {
+  createGameRepositories,
+  SqliteRatingRepository,
+} from '../../features/game/infrastructure/sqlite/repositories';
 import type { GameDatabaseConnection } from '../../features/game/infrastructure/sqlite/types';
 import { createMigratedTestDatabase } from './nodeSqliteTestAdapter';
 
@@ -202,6 +209,23 @@ test('MATCH saves weighted 01 PPD separately from three dart average for rating'
     );
     assert.equal(evaluationGame?.ppd_milli, 13333);
     assert.equal(evaluationGame?.three_dart_average_milli, 40000);
+
+    const ratingService = new RatingApplicationService(
+      new SqliteRatingRepository(db),
+      () => '2026-07-15T00:00:00.000Z',
+    );
+    await ratingService.processPending({ calculationDateTime: '2026-07-15T00:00:00.000Z' });
+    const snapshot = await db.getFirstAsync<{ calculation_detail_json: string }>(
+      `SELECT s.calculation_detail_json
+       FROM rating_snapshots s
+       JOIN rating_evaluations e ON e.id = s.evaluation_id
+       WHERE e.source_match_id = ?`,
+      match.matchId,
+    );
+    const calculationDetail = JSON.parse(snapshot?.calculation_detail_json ?? '{}') as {
+      windowPpd?: number;
+    };
+    assert.ok(Math.abs((calculationDetail.windowPpd ?? 0) - 13.333) < 0.001);
 
     assert.equal(match.result?.zeroOnePpdMilli, 13333);
     assert.equal(match.result?.zeroOneThreeDartAverageMilli, 40000);
