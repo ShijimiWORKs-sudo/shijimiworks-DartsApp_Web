@@ -4,6 +4,11 @@ import { Alert, BackHandler, Pressable, StyleSheet, Text, View } from 'react-nat
 
 import { AppButton } from '../../../../components/AppButton';
 import { Card } from '../../../../components/Card';
+import {
+  GameLeaveDialog,
+  type GameLeaveDialogStep,
+} from '../../../../components/game/GameLeaveDialog';
+import { useGameLeaveWebHistoryGuard } from '../../../../components/game/useGameLeaveWebHistoryGuard';
 import { ScreenShell } from '../../../../components/ScreenShell';
 import { SectionTitle } from '../../../../components/SectionTitle';
 import { useDesktopWebLayout } from '../../../../components/web/useDesktopWebLayout';
@@ -12,7 +17,6 @@ import { colors } from '../../../../constants/theme';
 import { useGameDatabase } from '../../../../contexts/GameDatabaseContext';
 import {
   clearMatchRedoSession,
-  createMatchLeaveChoices,
   MatchManualWinnerRequiredError,
   MatchRedoSession,
 } from '../../../../features/game/application/services';
@@ -26,6 +30,7 @@ import type { DartArea } from '../../../../features/game/domain/types';
 
 const zeroOneSegments = [20, 19, 18, 17, 16, 15, 14, 13, 12, 11, 10];
 const cricketSegments = [20, 19, 18, 17, 16, 15];
+const genericLeaveError = '操作を完了できませんでした。\n少し待ってからもう一度お試しください。';
 
 type BeforeRemoveEvent = {
   preventDefault: () => void;
@@ -48,7 +53,13 @@ export default function MatchPlayScreen() {
     useState<Exclude<DartArea, 'outer_bull' | 'inner_bull' | 'miss'>>('single');
   const [isBusy, setIsBusy] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
+  const [leaveDialogVisible, setLeaveDialogVisible] = useState(false);
+  const [leaveDialogInitialStep, setLeaveDialogInitialStep] =
+    useState<GameLeaveDialogStep>('leave');
+  const [leaveDialogError, setLeaveDialogError] = useState<string | null>(null);
+  const [isLeaveProcessing, setIsLeaveProcessing] = useState(false);
   const allowNavigationRef = useRef(false);
+  const leaveProcessingRef = useRef(false);
   const redoSessionRef = useRef(new MatchRedoSession());
 
   const activeGame = match?.activeGame ?? null;
@@ -68,6 +79,20 @@ export default function MatchPlayScreen() {
     allowNavigationRef.current = true;
     router.replace('/game');
   }, [clearRedoSession, router]);
+
+  const openLeaveDialog = useCallback((initialStep: GameLeaveDialogStep = 'leave') => {
+    setLeaveDialogInitialStep(initialStep);
+    setLeaveDialogError(null);
+    setLeaveDialogVisible(true);
+  }, []);
+
+  const closeLeaveDialog = useCallback(() => {
+    if (isLeaveProcessing) {
+      return;
+    }
+    setLeaveDialogVisible(false);
+    setLeaveDialogError(null);
+  }, [isLeaveProcessing]);
 
   const loadMatch = useCallback(async () => {
     if (!services || !matchId) return;
@@ -101,26 +126,14 @@ export default function MatchPlayScreen() {
       return;
     }
 
-    const choices = createMatchLeaveChoices({
-      matchId: match.matchId,
-      match: services.match,
-      navigateToGameHub,
-    });
+    openLeaveDialog('leave');
+  }, [match, navigateToGameHub, openLeaveDialog, services]);
 
-    Alert.alert(
-      'MATCHを離れますか？',
-      '進行中のMATCHを保存して戻るか、途中終了として保存できます。',
-      choices.map((choice) => ({
-        text: choice.label,
-        style: choice.style,
-        onPress: () => {
-          void choice.run().catch((error) => {
-            Alert.alert('操作できませんでした', getErrorMessage(error));
-          });
-        },
-      })),
-    );
-  }, [match, navigateToGameHub, services]);
+  useGameLeaveWebHistoryGuard({
+    isActive: match?.status === 'in_progress',
+    allowNavigationRef,
+    onRequestLeave: promptLeave,
+  });
 
   useFocusEffect(
     useCallback(() => {
@@ -252,22 +265,56 @@ export default function MatchPlayScreen() {
     void runAction(async () => services.match.startNextGame(match.matchId));
   }, [clearRedoSession, match, router, runAction, services]);
 
+  const handlePauseAndLeave = useCallback(async () => {
+    if (!services || !match || leaveProcessingRef.current) {
+      return;
+    }
+
+    leaveProcessingRef.current = true;
+    setIsLeaveProcessing(true);
+    setLeaveDialogError(null);
+    try {
+      clearRedoSession();
+      await services.match.pauseMatch(match.matchId);
+      allowNavigationRef.current = true;
+      setLeaveDialogVisible(false);
+      router.replace('/game');
+    } catch (error) {
+      console.warn('Failed to pause MATCH before leaving.', error);
+      setLeaveDialogError(genericLeaveError);
+    } finally {
+      leaveProcessingRef.current = false;
+      setIsLeaveProcessing(false);
+    }
+  }, [clearRedoSession, match, router, services]);
+
+  const handleConfirmAbort = useCallback(async () => {
+    if (!services || !match || leaveProcessingRef.current) {
+      return;
+    }
+
+    leaveProcessingRef.current = true;
+    setIsLeaveProcessing(true);
+    setLeaveDialogError(null);
+    try {
+      clearRedoSession();
+      await services.match.abortMatch(match.matchId);
+      allowNavigationRef.current = true;
+      setLeaveDialogVisible(false);
+      router.replace('/game');
+    } catch (error) {
+      console.warn('Failed to abort MATCH before leaving.', error);
+      setLeaveDialogError(genericLeaveError);
+    } finally {
+      leaveProcessingRef.current = false;
+      setIsLeaveProcessing(false);
+    }
+  }, [clearRedoSession, match, router, services]);
+
   const handleAbort = useCallback(() => {
     if (!services || !match) return;
-    Alert.alert('MATCHを中断しますか？', '中断したMATCHはRating候補になりません。', [
-      { text: 'キャンセル', style: 'cancel' },
-      {
-        text: '中断する',
-        style: 'destructive',
-        onPress: () => {
-          void runAction(async () => {
-            await services.match.abortMatch(match.matchId);
-            navigateToGameHub();
-          });
-        },
-      },
-    ]);
-  }, [match, navigateToGameHub, runAction, services]);
+    openLeaveDialog('abort');
+  }, [match, openLeaveDialog, services]);
 
   if (!match) {
     return (
@@ -446,16 +493,29 @@ export default function MatchPlayScreen() {
               label="ゲーム一覧へ"
               onPress={promptLeave}
               variant="secondary"
+              disabled={isBusy || isLeaveProcessing}
               style={isDesktopWeb && webGameStyles.desktopFooterButton}
             />
             <AppButton
               label="MATCH中断"
               onPress={handleAbort}
               variant="danger"
+              disabled={isBusy || isLeaveProcessing}
               style={isDesktopWeb && webGameStyles.desktopFooterButton}
             />
           </View>
         }
+      />
+      <GameLeaveDialog
+        visible={leaveDialogVisible}
+        gameLabel="MATCH"
+        canPause={match.status === 'in_progress'}
+        isProcessing={isLeaveProcessing}
+        errorMessage={leaveDialogError}
+        initialStep={leaveDialogInitialStep}
+        onPauseAndLeave={() => void handlePauseAndLeave()}
+        onContinue={closeLeaveDialog}
+        onRequestAbort={() => void handleConfirmAbort()}
       />
     </ScreenShell>
   );

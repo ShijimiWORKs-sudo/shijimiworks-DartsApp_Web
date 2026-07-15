@@ -4,6 +4,11 @@ import { Alert, BackHandler, Pressable, StyleSheet, Text, View } from 'react-nat
 
 import { AppButton } from '../../../../components/AppButton';
 import { Card } from '../../../../components/Card';
+import {
+  GameLeaveDialog,
+  type GameLeaveDialogStep,
+} from '../../../../components/game/GameLeaveDialog';
+import { useGameLeaveWebHistoryGuard } from '../../../../components/game/useGameLeaveWebHistoryGuard';
 import { ScreenShell } from '../../../../components/ScreenShell';
 import { SectionTitle } from '../../../../components/SectionTitle';
 import { useDesktopWebLayout } from '../../../../components/web/useDesktopWebLayout';
@@ -23,6 +28,7 @@ import type {
 import type { DartArea } from '../../../../features/game/domain/types';
 
 const segmentNumbers = [20, 19, 18, 17, 16, 15];
+const genericLeaveError = '操作を完了できませんでした。\n少し待ってからもう一度お試しください。';
 
 type BeforeRemoveEvent = {
   preventDefault: () => void;
@@ -44,7 +50,13 @@ export default function CricketPlayScreen() {
   const [selectedSegment, setSelectedSegment] = useState(20);
   const [isBusy, setIsBusy] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
+  const [leaveDialogVisible, setLeaveDialogVisible] = useState(false);
+  const [leaveDialogInitialStep, setLeaveDialogInitialStep] =
+    useState<GameLeaveDialogStep>('leave');
+  const [leaveDialogError, setLeaveDialogError] = useState<string | null>(null);
+  const [isLeaveProcessing, setIsLeaveProcessing] = useState(false);
   const allowNavigationRef = useRef(false);
+  const leaveProcessingRef = useRef(false);
   const redoSessionRef = useRef(new CricketRedoSession());
 
   const activeDarts = useMemo(
@@ -66,6 +78,20 @@ export default function CricketPlayScreen() {
     allowNavigationRef.current = true;
     router.replace('/game');
   }, [clearRedoSession, router]);
+
+  const openLeaveDialog = useCallback((initialStep: GameLeaveDialogStep = 'leave') => {
+    setLeaveDialogInitialStep(initialStep);
+    setLeaveDialogError(null);
+    setLeaveDialogVisible(true);
+  }, []);
+
+  const closeLeaveDialog = useCallback(() => {
+    if (isLeaveProcessing) {
+      return;
+    }
+    setLeaveDialogVisible(false);
+    setLeaveDialogError(null);
+  }, [isLeaveProcessing]);
 
   const loadGame = useCallback(async () => {
     if (!services || !gameId) {
@@ -101,42 +127,14 @@ export default function CricketPlayScreen() {
       return;
     }
 
-    Alert.alert(
-      'CRICKETを離れますか？',
-      '進行中のゲームを保存して戻るか、途中終了として保存できます。',
-      [
-        {
-          text: '一時停止してゲームハブへ戻る',
-          onPress: () => {
-            void services.cricket
-              .pauseGame(game.gameId)
-              .then(navigateToGameHub)
-              .catch((error) => Alert.alert('操作できませんでした', getErrorMessage(error)));
-          },
-        },
-        { text: 'ゲームを続ける', style: 'cancel' },
-        {
-          text: '途中終了する',
-          style: 'destructive',
-          onPress: () => {
-            Alert.alert('ゲームを途中終了しますか？', 'CRICKETをabortedとして保存します。', [
-              { text: 'キャンセル', style: 'cancel' },
-              {
-                text: '途中終了する',
-                style: 'destructive',
-                onPress: () => {
-                  void services.cricket
-                    .abortGame(game.gameId)
-                    .then(navigateToGameHub)
-                    .catch((error) => Alert.alert('操作できませんでした', getErrorMessage(error)));
-                },
-              },
-            ]);
-          },
-        },
-      ],
-    );
-  }, [game, navigateToGameHub, services]);
+    openLeaveDialog('leave');
+  }, [game, navigateToGameHub, openLeaveDialog, services]);
+
+  useGameLeaveWebHistoryGuard({
+    isActive: game?.status === 'in_progress',
+    allowNavigationRef,
+    onRequestLeave: promptLeave,
+  });
 
   useFocusEffect(
     useCallback(() => {
@@ -218,25 +216,59 @@ export default function CricketPlayScreen() {
     [clearRedoSession, game, inputDisabled, runAction, services],
   );
 
+  const handlePauseAndLeave = useCallback(async () => {
+    if (!services || !game || leaveProcessingRef.current) {
+      return;
+    }
+
+    leaveProcessingRef.current = true;
+    setIsLeaveProcessing(true);
+    setLeaveDialogError(null);
+    try {
+      clearRedoSession();
+      await services.cricket.pauseGame(game.gameId);
+      allowNavigationRef.current = true;
+      setLeaveDialogVisible(false);
+      router.replace('/game');
+    } catch (error) {
+      console.warn('Failed to pause CRICKET before leaving.', error);
+      setLeaveDialogError(genericLeaveError);
+    } finally {
+      leaveProcessingRef.current = false;
+      setIsLeaveProcessing(false);
+    }
+  }, [clearRedoSession, game, router, services]);
+
+  const handleConfirmAbort = useCallback(async () => {
+    if (!services || !game || leaveProcessingRef.current) {
+      return;
+    }
+
+    leaveProcessingRef.current = true;
+    setIsLeaveProcessing(true);
+    setLeaveDialogError(null);
+    try {
+      clearRedoSession();
+      await services.cricket.abortGame(game.gameId);
+      allowNavigationRef.current = true;
+      setLeaveDialogVisible(false);
+      router.replace('/game');
+    } catch (error) {
+      console.warn('Failed to abort CRICKET before leaving.', error);
+      setLeaveDialogError(genericLeaveError);
+    } finally {
+      leaveProcessingRef.current = false;
+      setIsLeaveProcessing(false);
+    }
+  }, [clearRedoSession, game, router, services]);
+
   const handleAbort = useCallback(() => {
     if (!services || !game) {
       return;
     }
 
-    Alert.alert('ゲームを中断しますか？', '中断したCRICKETは結果として保存されません。', [
-      { text: 'キャンセル', style: 'cancel' },
-      {
-        text: '中断する',
-        style: 'destructive',
-        onPress: () => {
-          void runAction(async () => {
-            await services.cricket.abortGame(game.gameId);
-            navigateToGameHub();
-          });
-        },
-      },
-    ]);
-  }, [game, navigateToGameHub, runAction, services]);
+    openLeaveDialog('abort');
+  }, [game, openLeaveDialog, services]);
 
   if (!game) {
     return (
@@ -460,16 +492,29 @@ export default function CricketPlayScreen() {
               label="ゲーム一覧へ"
               onPress={promptLeave}
               variant="secondary"
+              disabled={isBusy || isLeaveProcessing}
               style={isDesktopWeb && webGameStyles.desktopFooterButton}
             />
             <AppButton
               label="途中終了"
               onPress={handleAbort}
               variant="danger"
+              disabled={isBusy || isLeaveProcessing}
               style={isDesktopWeb && webGameStyles.desktopFooterButton}
             />
           </View>
         }
+      />
+      <GameLeaveDialog
+        visible={leaveDialogVisible}
+        gameLabel="STANDARD CRICKET"
+        canPause={game.status === 'in_progress'}
+        isProcessing={isLeaveProcessing}
+        errorMessage={leaveDialogError}
+        initialStep={leaveDialogInitialStep}
+        onPauseAndLeave={() => void handlePauseAndLeave()}
+        onContinue={closeLeaveDialog}
+        onRequestAbort={() => void handleConfirmAbort()}
       />
     </ScreenShell>
   );

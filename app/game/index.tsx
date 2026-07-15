@@ -101,25 +101,19 @@ export default function GameHubScreen() {
       />
 
       {activeGame ? (
-        <Pressable
-          accessibilityRole="button"
-          onPress={() => router.push(getPlayRoute(activeGame))}
-          style={({ pressed }) => pressed && styles.pressed}
-        >
-          <Card muted>
-            <SectionTitle
-              title={getActiveTitle(activeGame)}
-              subtitle={getActiveSubtitle(activeGame)}
-              tone="card"
+        <Card muted>
+          <SectionTitle
+            title={getActiveTitle(activeGame)}
+            subtitle={getActiveSubtitle(activeGame)}
+            tone="card"
+          />
+          <View style={styles.cardAction}>
+            <AppButton
+              label={getActiveStatus(activeGame) === 'paused' ? '再開する' : 'ゲームへ戻る'}
+              onPress={() => router.push(getPlayRoute(activeGame))}
             />
-            <View style={styles.cardAction}>
-              <AppButton
-                label={getActiveStatus(activeGame) === 'paused' ? '再開する' : 'ゲームへ戻る'}
-                onPress={() => router.push(getPlayRoute(activeGame))}
-              />
-            </View>
-          </Card>
-        </Pressable>
+          </View>
+        </Card>
       ) : null}
 
       {accountOverview ? (
