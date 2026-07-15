@@ -96,8 +96,11 @@ Source revision recalculation:
 MATCH observation repair:
 
 - Completed MATCH result loading can re-sync game and match result stats from raw turn/dart rows
-- If the stored Rating Evaluation no longer matches the corrected MATCH observation, a new `source_revision` is created
+- Legacy detection compares raw canonical turn/dart aggregation against `game_player_results`, `match_player_results`, latest `rating_evaluations`, and `rating_evaluation_games`
+- Stored `extra_stats_json.schemaVersion` alone is not trusted when deciding whether MATCH 01 PPD is current
+- If the stored Rating Evaluation no longer matches the canonical MATCH observation, a new `source_revision` is created
 - The new revision is passed to Rating recalculation so old Evaluations/Snapshots are invalidated and Profile is rebuilt from the latest valid Snapshot
+- Re-running the repair after canonical rows and latest Evaluation are aligned is idempotent and does not create another revision
 - Existing Account and user data are not deleted
 
 ## UI
@@ -170,6 +173,8 @@ Added coverage:
 - MATCH source revision repair creates a new revision when stored PPD is stale
 - Natural 501 CHECKOUT in 9 darts stores `zero_one_ppd_milli = 55667` and `three_dart_average_milli = 167000`
 - Rating Index conversion clamps above-anchor PPD to Index 18 without clamping the raw stored PPD
+- Legacy MATCH repair rebuilds stale 60.00 PPD / 180.00 3DA summaries from raw 501-in-9 checkout turns, creates a new source revision, invalidates the old Snapshot, rebuilds Profile, and is idempotent on the second run
+- MATCH result repair failures stay on the result screen with a generic retry message while logging the original error with `console.warn`
 
 Final test suite result during implementation:
 

@@ -1734,7 +1734,68 @@ async function getMatchPlayerAggregate(
   };
 }
 
+type MatchPlayerAggregateStats = Awaited<ReturnType<typeof getMatchPlayerAggregate>>;
+
+type CanonicalGamePlayerStats = Awaited<ReturnType<typeof getPlayerGameStats>> & {
+  gameId: string;
+  gameNo: MatchGameNo;
+  mode: MatchGameMode;
+};
+
+async function getMatchPlayerCanonicalStats(
+  db: GameDatabaseExecutor,
+  matchId: string,
+  playerId: string,
+): Promise<{
+  games: CanonicalGamePlayerStats[];
+  aggregate: MatchPlayerAggregateStats;
+}> {
+  const games = await loadGameRows(db, matchId);
+  const canonicalGames: CanonicalGamePlayerStats[] = [];
+
+  for (const game of games) {
+    const gamePlayer = await db.getFirstAsync<{ id: string }>(
+      `SELECT id FROM game_players WHERE game_id = ? AND player_id = ? LIMIT 1`,
+      game.id,
+      playerId,
+    );
+    if (!gamePlayer) {
+      continue;
+    }
+    canonicalGames.push({
+      ...(await getPlayerGameStats(db, game.id, gamePlayer.id)),
+      gameId: game.id,
+      gameNo: game.match_game_no,
+      mode: game.mode,
+    });
+  }
+
+  const zeroOne = canonicalGames.filter((game) => game.mode === 'zero_one');
+  const cricket = canonicalGames.filter((game) => game.mode === 'cricket');
+  const zeroOneScore = zeroOne.reduce((sum, game) => sum + game.zeroOneRatingEffectiveScore, 0);
+  const zeroOneDarts = zeroOne.reduce((sum, game) => sum + game.zeroOneRatingDarts, 0);
+  const cricketMarks = cricket.reduce((sum, game) => sum + game.marks, 0);
+  const cricketTurns = cricket.reduce((sum, game) => sum + game.turns, 0);
+
+  return {
+    games: canonicalGames,
+    aggregate: {
+      zeroOneGameCount: zeroOne.length,
+      zeroOnePpdMilli: calculatePpdMilli(zeroOneScore, zeroOneDarts),
+      zeroOneThreeDartAverageMilli: calculateThreeDartAverageMilli(zeroOneScore, zeroOneDarts),
+      cricketGameCount: cricket.length,
+      cricketMprMilli: cricketTurns > 0 ? Math.round((cricketMarks * 1000) / cricketTurns) : null,
+      totalDarts: canonicalGames.reduce((sum, game) => sum + game.darts, 0),
+      bullCount: canonicalGames.reduce((sum, game) => sum + game.bull, 0),
+      tripleCount: canonicalGames.reduce((sum, game) => sum + game.triple, 0),
+      doubleCount: canonicalGames.reduce((sum, game) => sum + game.double, 0),
+      bustCount: canonicalGames.reduce((sum, game) => sum + game.bust, 0),
+    },
+  };
+}
+
 type GamePlayerResultRow = {
+  effective_score: number;
   ppd_milli: number | null;
   three_dart_average_milli: number | null;
   mpr_milli: number | null;
@@ -1743,6 +1804,7 @@ type GamePlayerResultRow = {
   checkout_flag: number;
   bust_count: number;
   cricket_marks_total: number;
+  extra_stats_json: string | null;
 };
 
 async function getGamePlayerResult(
@@ -1751,14 +1813,154 @@ async function getGamePlayerResult(
   playerId: string,
 ): Promise<GamePlayerResultRow | null> {
   return db.getFirstAsync<GamePlayerResultRow>(
-    `SELECT ppd_milli, three_dart_average_milli, mpr_milli, darts_thrown,
-            rounds_count, checkout_flag, bust_count, cricket_marks_total
+    `SELECT effective_score, ppd_milli, three_dart_average_milli, mpr_milli,
+            darts_thrown, rounds_count, checkout_flag, bust_count,
+            cricket_marks_total, extra_stats_json
      FROM game_player_results
      WHERE game_id = ? AND player_id = ?
      LIMIT 1`,
     gameId,
     playerId,
   );
+}
+
+function gamePlayerResultMatchesCanonical(
+  row: GamePlayerResultRow | null,
+  canonical: CanonicalGamePlayerStats,
+) {
+  if (!row) return false;
+  const extra = parseExtraStats(row.extra_stats_json);
+  const zeroOneMatches =
+    canonical.mode !== 'zero_one' ||
+    (row.effective_score === canonical.effectiveScore &&
+      row.ppd_milli === canonical.ppdMilli &&
+      row.three_dart_average_milli === canonical.threeDartAverageMilli &&
+      extra.zeroOneRatingEffectiveScore === canonical.zeroOneRatingEffectiveScore &&
+      extra.zeroOneRatingDarts === canonical.zeroOneRatingDarts);
+  const cricketMatches =
+    canonical.mode !== 'cricket' ||
+    (row.mpr_milli === canonical.mprMilli && row.cricket_marks_total === canonical.marks);
+
+  return (
+    zeroOneMatches &&
+    cricketMatches &&
+    row.darts_thrown === canonical.darts &&
+    row.rounds_count === canonical.rounds &&
+    row.checkout_flag === canonical.checkout &&
+    row.bust_count === canonical.bust
+  );
+}
+
+type MatchPlayerResultRow = {
+  zero_one_game_count: number;
+  zero_one_ppd_milli: number | null;
+  zero_one_three_dart_average_milli: number | null;
+  cricket_game_count: number;
+  cricket_mpr_milli: number | null;
+  total_darts: number;
+  bull_count: number;
+  triple_count: number;
+  double_count: number;
+  bust_count: number;
+};
+
+type RatingEvaluationGameRow = {
+  game_id: string;
+  mode: MatchGameMode;
+  game_no: MatchGameNo;
+  ppd_milli: number | null;
+  three_dart_average_milli: number | null;
+  mpr_milli: number | null;
+  darts_thrown: number;
+  rounds_count: number;
+  checkout_flag: number;
+  bust_count: number;
+  marks_total: number;
+};
+
+async function getMatchPlayerResult(
+  db: GameDatabaseExecutor,
+  matchId: string,
+  playerId: string,
+): Promise<MatchPlayerResultRow | null> {
+  return db.getFirstAsync<MatchPlayerResultRow>(
+    `SELECT zero_one_game_count, zero_one_ppd_milli, zero_one_three_dart_average_milli,
+            cricket_game_count, cricket_mpr_milli, total_darts, bull_count,
+            triple_count, double_count, bust_count
+     FROM match_player_results
+     WHERE match_id = ? AND player_id = ?
+     LIMIT 1`,
+    matchId,
+    playerId,
+  );
+}
+
+async function getRatingEvaluationGames(
+  db: GameDatabaseExecutor,
+  evaluationId: string,
+): Promise<RatingEvaluationGameRow[]> {
+  return db.getAllAsync<RatingEvaluationGameRow>(
+    `SELECT game_id, mode, game_no, ppd_milli, three_dart_average_milli,
+            mpr_milli, darts_thrown, rounds_count, checkout_flag,
+            bust_count, marks_total
+     FROM rating_evaluation_games
+     WHERE evaluation_id = ?
+     ORDER BY game_no ASC, game_id ASC`,
+    evaluationId,
+  );
+}
+
+function matchPlayerResultMatchesCanonical(
+  row: MatchPlayerResultRow | null,
+  canonical: MatchPlayerAggregateStats,
+) {
+  return (
+    row !== null &&
+    row.zero_one_game_count === canonical.zeroOneGameCount &&
+    row.zero_one_ppd_milli === canonical.zeroOnePpdMilli &&
+    row.zero_one_three_dart_average_milli === canonical.zeroOneThreeDartAverageMilli &&
+    row.cricket_game_count === canonical.cricketGameCount &&
+    row.cricket_mpr_milli === canonical.cricketMprMilli &&
+    row.total_darts === canonical.totalDarts &&
+    row.bull_count === canonical.bullCount &&
+    row.triple_count === canonical.tripleCount &&
+    row.double_count === canonical.doubleCount &&
+    row.bust_count === canonical.bustCount
+  );
+}
+
+function ratingEvaluationGamesMatchCanonical(
+  rows: RatingEvaluationGameRow[],
+  canonicalGames: CanonicalGamePlayerStats[],
+) {
+  if (rows.length !== canonicalGames.length) return false;
+  return canonicalGames.every((canonical) => {
+    const row = rows.find((entry) => entry.game_id === canonical.gameId);
+    if (!row) return false;
+    const zeroOneMatches =
+      canonical.mode !== 'zero_one' ||
+      (row.ppd_milli === canonical.ppdMilli &&
+        row.three_dart_average_milli === canonical.threeDartAverageMilli &&
+        row.mpr_milli === null &&
+        row.marks_total === 0);
+    const cricketMatches =
+      canonical.mode !== 'cricket' ||
+      (row.ppd_milli === null &&
+        row.three_dart_average_milli === null &&
+        row.mpr_milli === canonical.mprMilli &&
+        row.marks_total === canonical.marks);
+
+    return (
+      zeroOneMatches &&
+      cricketMatches &&
+      row.mode === canonical.mode &&
+      row.game_no === canonical.gameNo &&
+      row.darts_thrown === canonical.darts &&
+      row.rounds_count === canonical.rounds &&
+      row.checkout_flag === canonical.checkout &&
+      row.bust_count === canonical.bust
+    );
+  });
 }
 
 function calculatePpdMilli(effectiveScore: number, ratingDarts: number) {
@@ -1912,16 +2114,32 @@ async function ensureMatchRatingEvaluationCurrent(db: GameDatabaseExecutor, matc
     return { evaluationId: null, recalculationRequired: false };
   }
 
+  const canonical = await getMatchPlayerCanonicalStats(db, matchId, owner.id);
+  const gameRowsCurrent = (
+    await Promise.all(
+      canonical.games.map(async (game) =>
+        gamePlayerResultMatchesCanonical(
+          await getGamePlayerResult(db, game.gameId, owner.id),
+          game,
+        ),
+      ),
+    )
+  ).every(Boolean);
+  const matchRowCurrent = matchPlayerResultMatchesCanonical(
+    await getMatchPlayerResult(db, matchId, owner.id),
+    canonical.aggregate,
+  );
+
   const games = await loadGameRows(db, matchId);
   for (const game of games.filter((entry) => entry.status === 'completed')) {
     await insertGamePlayerResults(db, game.id, game.completion_reason ?? 'completed');
   }
   await insertMatchPlayerResults(db, matchId);
 
-  const aggregate = await getMatchPlayerAggregate(db, matchId, owner.id);
   const latest = await db.getFirstAsync<{
     id: string;
     source_revision: number;
+    status: string;
     candidate_flag: number;
     match_result: 'win' | 'loss' | null;
     zero_one_game_count: number;
@@ -1932,7 +2150,7 @@ async function ensureMatchRatingEvaluationCurrent(db: GameDatabaseExecutor, matc
     source_weight_milli: number;
     input_payload_json: string;
   }>(
-    `SELECT id, source_revision, candidate_flag, match_result, zero_one_game_count,
+    `SELECT id, source_revision, status, candidate_flag, match_result, zero_one_game_count,
             zero_one_ppd_milli, cricket_game_count, cricket_mpr_milli, total_darts,
             source_weight_milli, input_payload_json
      FROM rating_evaluations
@@ -1946,13 +2164,22 @@ async function ensureMatchRatingEvaluationCurrent(db: GameDatabaseExecutor, matc
     return { evaluationId: null, recalculationRequired: false };
   }
 
-  const matchesCurrent =
-    latest.zero_one_game_count === aggregate.zeroOneGameCount &&
-    latest.zero_one_ppd_milli === aggregate.zeroOnePpdMilli &&
-    latest.cricket_game_count === aggregate.cricketGameCount &&
-    latest.cricket_mpr_milli === aggregate.cricketMprMilli &&
-    latest.total_darts === aggregate.totalDarts;
-  if (matchesCurrent) {
+  const evaluationMatchesCanonical =
+    latest.status !== 'invalidated' &&
+    latest.zero_one_game_count === canonical.aggregate.zeroOneGameCount &&
+    latest.zero_one_ppd_milli === canonical.aggregate.zeroOnePpdMilli &&
+    latest.cricket_game_count === canonical.aggregate.cricketGameCount &&
+    latest.cricket_mpr_milli === canonical.aggregate.cricketMprMilli &&
+    latest.total_darts === canonical.aggregate.totalDarts;
+  const evaluationGamesMatch = ratingEvaluationGamesMatchCanonical(
+    await getRatingEvaluationGames(db, latest.id),
+    canonical.games,
+  );
+  const rowsWereAlreadyCurrent = gameRowsCurrent && matchRowCurrent;
+  if (rowsWereAlreadyCurrent && evaluationMatchesCanonical && evaluationGamesMatch) {
+    return { evaluationId: latest.id, recalculationRequired: false };
+  }
+  if (evaluationMatchesCanonical && evaluationGamesMatch) {
     return { evaluationId: latest.id, recalculationRequired: false };
   }
 
@@ -1975,19 +2202,18 @@ async function ensureMatchRatingEvaluationCurrent(db: GameDatabaseExecutor, matc
     sourceRevision,
     latest.candidate_flag,
     latest.match_result,
-    aggregate.zeroOneGameCount,
-    aggregate.zeroOnePpdMilli,
-    aggregate.cricketGameCount,
-    aggregate.cricketMprMilli,
-    aggregate.totalDarts,
+    canonical.aggregate.zeroOneGameCount,
+    canonical.aggregate.zeroOnePpdMilli,
+    canonical.aggregate.cricketGameCount,
+    canonical.aggregate.cricketMprMilli,
+    canonical.aggregate.totalDarts,
     latest.source_weight_milli,
-    aggregate.totalDarts,
+    canonical.aggregate.totalDarts,
     latest.input_payload_json,
     now,
   );
 
-  for (const game of games) {
-    const stats = await getGamePlayerResult(db, game.id, owner.id);
+  for (const game of canonical.games) {
     await db.runAsync(
       `INSERT OR IGNORE INTO rating_evaluation_games(
          evaluation_id, game_id, mode, game_no, ppd_milli, three_dart_average_milli,
@@ -1995,17 +2221,17 @@ async function ensureMatchRatingEvaluationCurrent(db: GameDatabaseExecutor, matc
        )
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       evaluationId,
-      game.id,
+      game.gameId,
       game.mode,
-      game.match_game_no,
-      game.mode === 'zero_one' ? (stats?.ppd_milli ?? null) : null,
-      game.mode === 'zero_one' ? (stats?.three_dart_average_milli ?? null) : null,
-      game.mode === 'cricket' ? (stats?.mpr_milli ?? null) : null,
-      stats?.darts_thrown ?? 0,
-      stats?.rounds_count ?? 0,
-      stats?.checkout_flag ?? 0,
-      stats?.bust_count ?? 0,
-      stats?.cricket_marks_total ?? 0,
+      game.gameNo,
+      game.mode === 'zero_one' ? game.ppdMilli : null,
+      game.mode === 'zero_one' ? game.threeDartAverageMilli : null,
+      game.mode === 'cricket' ? game.mprMilli : null,
+      game.darts,
+      game.rounds,
+      game.checkout,
+      game.bust,
+      game.mode === 'cricket' ? game.marks : 0,
       now,
     );
   }

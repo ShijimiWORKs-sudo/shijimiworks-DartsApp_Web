@@ -370,7 +370,7 @@ test('MATCH natural 501 checkout counts the final checkout darts in PPD', async 
   }
 });
 
-test('MATCH rating repair creates a new source revision when stored PPD is stale', async () => {
+test('MATCH rating repair rebuilds legacy 60 PPD summaries from raw checkout turns', async () => {
   const db = await createMigratedTestDatabase();
   try {
     const { service, ownerPlayerId, guestPlayerId } = await createMatchFixture(db);
@@ -383,32 +383,136 @@ test('MATCH rating repair creates a new source revision when stored PPD is stale
       game1FirstThrowPlayerId: ownerPlayerId,
     });
 
+    for (const [index, action] of (
+      [
+        ['triple', 20],
+        ['triple', 20],
+        ['triple', 20],
+      ] as const
+    ).entries()) {
+      match = await service.recordDart(match.matchId, {
+        area: action[0],
+        segmentNumber: action[1],
+        clientActionId: `repair-checkout-r1-${index}`,
+      });
+    }
+    match = await service.confirmTurn(match.matchId);
     match = await service.recordDart(match.matchId, {
-      area: 'single',
-      segmentNumber: 20,
-      clientActionId: 'match-repair-dart-1',
-    });
-    match = await service.recordDart(match.matchId, {
-      area: 'single',
-      segmentNumber: 20,
-      clientActionId: 'match-repair-dart-2',
+      area: 'miss',
+      segmentNumber: null,
+      clientActionId: 'repair-guest-miss-1',
     });
     match = await service.confirmTurn(match.matchId);
-    match = await service.completeCurrentGameByManualWinner(match.matchId, {
-      winnerPlayerId: ownerPlayerId,
-      reason: 'manual game one winner',
+
+    for (const [index, action] of (
+      [
+        ['triple', 20],
+        ['triple', 20],
+        ['triple', 20],
+      ] as const
+    ).entries()) {
+      match = await service.recordDart(match.matchId, {
+        area: action[0],
+        segmentNumber: action[1],
+        clientActionId: `repair-checkout-r2-${index}`,
+      });
+    }
+    match = await service.confirmTurn(match.matchId);
+    match = await service.recordDart(match.matchId, {
+      area: 'miss',
+      segmentNumber: null,
+      clientActionId: 'repair-guest-miss-2',
     });
+    match = await service.confirmTurn(match.matchId);
+
+    match = await service.recordDart(match.matchId, {
+      area: 'triple',
+      segmentNumber: 20,
+      clientActionId: 'repair-checkout-final-t20',
+    });
+    match = await service.recordDart(match.matchId, {
+      area: 'triple',
+      segmentNumber: 19,
+      clientActionId: 'repair-checkout-final-t19',
+    });
+    match = await service.recordDart(match.matchId, {
+      area: 'double',
+      segmentNumber: 12,
+      clientActionId: 'repair-checkout-final-d12',
+    });
+
+    assert.equal(match.activeGame, null);
+    assert.equal(match.phase, 'next_game_available');
+
     match = await service.startNextGame(match.matchId);
     match = await service.completeCurrentGameByManualWinner(match.matchId, {
       winnerPlayerId: ownerPlayerId,
       reason: 'manual game two winner',
     });
 
-    await db.runAsync(
-      `UPDATE rating_evaluations
-       SET zero_one_ppd_milli = 40000
+    const ratingService = new RatingApplicationService(
+      new SqliteRatingRepository(db),
+      () => '2026-07-15T01:00:00.000Z',
+    );
+    await ratingService.processPending({ calculationDateTime: '2026-07-15T01:00:00.000Z' });
+
+    const originalEvaluation = await db.getFirstAsync<{ id: string }>(
+      `SELECT id
+       FROM rating_evaluations
        WHERE source_match_id = ? AND source_revision = 1`,
       match.matchId,
+    );
+    assert.ok(originalEvaluation?.id);
+    const originalSnapshot = await db.getFirstAsync<{ id: string }>(
+      `SELECT id FROM rating_snapshots WHERE evaluation_id = ?`,
+      originalEvaluation.id,
+    );
+    assert.ok(originalSnapshot?.id);
+
+    await db.runAsync(
+      `UPDATE rating_evaluations
+       SET zero_one_ppd_milli = 60000
+       WHERE source_match_id = ? AND source_revision = 1`,
+      match.matchId,
+    );
+    await db.runAsync(
+      `UPDATE rating_evaluation_games
+       SET ppd_milli = 60000,
+           three_dart_average_milli = 180000
+       WHERE evaluation_id = ? AND mode = 'zero_one'`,
+      originalEvaluation.id,
+    );
+    await db.runAsync(
+      `UPDATE game_player_results
+       SET ppd_milli = 60000,
+           three_dart_average_milli = 180000,
+           extra_stats_json = ?
+       WHERE player_id = ?
+         AND game_id IN (
+           SELECT id FROM game_sessions WHERE match_id = ? AND mode = 'zero_one'
+         )`,
+      JSON.stringify({
+        schemaVersion: 3,
+        zeroOneRatingEffectiveScore: 501,
+        zeroOneRatingDarts: 6,
+      }),
+      ownerPlayerId,
+      match.matchId,
+    );
+    await db.runAsync(
+      `UPDATE match_player_results
+       SET zero_one_ppd_milli = 60000,
+           zero_one_three_dart_average_milli = 180000
+       WHERE match_id = ? AND player_id = ?`,
+      match.matchId,
+      ownerPlayerId,
+    );
+    await db.runAsync(
+      `UPDATE rating_snapshots
+       SET calculation_detail_json = ?
+       WHERE evaluation_id = ?`,
+      JSON.stringify({ windowPpd: 60, finalPreciseRating: 18000 }),
+      originalEvaluation.id,
     );
 
     const repair = await service.ensureRatingEvaluationCurrent(match.matchId);
@@ -427,15 +531,107 @@ test('MATCH rating repair creates a new source revision when stored PPD is stale
       match.matchId,
     );
     assert.equal(latest?.source_revision, 2);
-    assert.equal(latest?.zero_one_ppd_milli, 13333);
+    assert.equal(latest?.zero_one_ppd_milli, 55667);
 
-    const revisionOne = await db.getFirstAsync<{ zero_one_ppd_milli: number | null }>(
+    const fixedGameResult = await db.getFirstAsync<{
+      ppd_milli: number | null;
+      three_dart_average_milli: number | null;
+      extra_stats_json: string;
+    }>(
+      `SELECT r.ppd_milli, r.three_dart_average_milli, r.extra_stats_json
+       FROM game_player_results r
+       JOIN game_sessions g ON g.id = r.game_id
+       WHERE g.match_id = ? AND g.mode = 'zero_one' AND r.player_id = ?`,
+      match.matchId,
+      ownerPlayerId,
+    );
+    assert.equal(fixedGameResult?.ppd_milli, 55667);
+    assert.equal(fixedGameResult?.three_dart_average_milli, 167000);
+    assert.match(fixedGameResult?.extra_stats_json ?? '', /"zeroOneRatingDarts":9/);
+
+    const fixedMatchResult = await db.getFirstAsync<{
+      zero_one_ppd_milli: number | null;
+      zero_one_three_dart_average_milli: number | null;
+    }>(
+      `SELECT zero_one_ppd_milli, zero_one_three_dart_average_milli
+       FROM match_player_results
+       WHERE match_id = ? AND player_id = ?`,
+      match.matchId,
+      ownerPlayerId,
+    );
+    assert.equal(fixedMatchResult?.zero_one_ppd_milli, 55667);
+    assert.equal(fixedMatchResult?.zero_one_three_dart_average_milli, 167000);
+
+    const fixedEvaluationGame = await db.getFirstAsync<{
+      ppd_milli: number | null;
+      three_dart_average_milli: number | null;
+    }>(
+      `SELECT g.ppd_milli, g.three_dart_average_milli
+       FROM rating_evaluation_games g
+       WHERE g.evaluation_id = ? AND g.mode = 'zero_one'`,
+      repair.evaluationId,
+    );
+    assert.equal(fixedEvaluationGame?.ppd_milli, 55667);
+    assert.equal(fixedEvaluationGame?.three_dart_average_milli, 167000);
+
+    await ratingService.recalculateFromEvaluation(repair.evaluationId, '2026-07-15T01:05:00.000Z');
+
+    const revisionOne = await db.getFirstAsync<{
+      zero_one_ppd_milli: number | null;
+      status: string;
+      invalidated_at: string | null;
+    }>(
       `SELECT zero_one_ppd_milli
+              , status
+              , invalidated_at
        FROM rating_evaluations
        WHERE source_match_id = ? AND source_revision = 1`,
       match.matchId,
     );
-    assert.equal(revisionOne?.zero_one_ppd_milli, 40000);
+    assert.equal(revisionOne?.zero_one_ppd_milli, 60000);
+    assert.equal(revisionOne?.status, 'invalidated');
+    assert.equal(revisionOne?.invalidated_at, '2026-07-15T01:05:00.000Z');
+
+    const oldSnapshot = await db.getFirstAsync<{
+      evaluation_id: string | null;
+      invalidated_at: string | null;
+    }>(
+      `SELECT evaluation_id, invalidated_at FROM rating_snapshots WHERE id = ?`,
+      originalSnapshot.id,
+    );
+    assert.equal(oldSnapshot?.evaluation_id, null);
+    assert.equal(oldSnapshot?.invalidated_at, '2026-07-15T01:05:00.000Z');
+
+    const validSnapshot = await db.getFirstAsync<{
+      id: string;
+      calculation_detail_json: string;
+      rating_tenths: number;
+    }>(
+      `SELECT id, calculation_detail_json, rating_tenths
+       FROM rating_snapshots
+       WHERE evaluation_id = ? AND invalidated_at IS NULL`,
+      repair.evaluationId,
+    );
+    assert.ok(validSnapshot?.id);
+    const calculationDetail = JSON.parse(validSnapshot?.calculation_detail_json ?? '{}') as {
+      windowPpd?: number;
+    };
+    assert.ok(Math.abs((calculationDetail.windowPpd ?? 0) - 55.667) < 0.001);
+
+    const profile = await db.getFirstAsync<{ rating_tenths: number }>(
+      `SELECT rating_tenths FROM rating_profiles WHERE owner_player_id = ?`,
+      ownerPlayerId,
+    );
+    assert.equal(profile?.rating_tenths, validSnapshot?.rating_tenths);
+
+    const secondRepair = await service.ensureRatingEvaluationCurrent(match.matchId);
+    assert.equal(secondRepair.recalculationRequired, false);
+    assert.equal(secondRepair.evaluationId, repair.evaluationId);
+    const revisionCount = await db.getFirstAsync<{ count: number }>(
+      `SELECT COUNT(*) AS count FROM rating_evaluations WHERE source_match_id = ?`,
+      match.matchId,
+    );
+    assert.equal(revisionCount?.count, 2);
   } finally {
     db.close();
   }

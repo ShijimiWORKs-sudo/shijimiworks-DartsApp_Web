@@ -81,6 +81,10 @@ test('game result screens use source Rating results instead of only profile stat
   assert.match(matchResult, /01 3DA/);
   assert.match(matchResult, /zeroOneThreeDartAverageMilli/);
   assert.match(matchResult, /ratingResult\.status === 'applied'/);
+  assert.match(matchResult, /ensureRatingEvaluationCurrent/);
+  assert.match(matchResult, /recalculateFromEvaluation/);
+  assert.match(matchResult, /console\.warn\('Failed to load MATCH result\.'/);
+  assert.match(matchResult, /保存済みスタッツを更新できませんでした。/);
   assert.match(
     readText('components/game/RatingResultCard.tsx'),
     /COUNT-UPはRating計算には使用されません/,

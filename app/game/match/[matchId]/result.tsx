@@ -22,6 +22,7 @@ export default function MatchResultScreen() {
   const isDesktopWeb = useDesktopWebLayout();
   const [match, setMatch] = useState<MatchState | null>(null);
   const [ratingResult, setRatingResult] = useState<RatingSourceResult | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useFocusEffect(
     useCallback(() => {
@@ -30,6 +31,7 @@ export default function MatchResultScreen() {
       async function loadMatch() {
         if (!services || !matchId) return;
         try {
+          if (mounted) setLoadError(null);
           const nextMatch = await services.match.loadMatch(matchId);
           if (nextMatch.status === 'in_progress' || nextMatch.status === 'paused') {
             router.replace(`/game/match/${nextMatch.matchId}`);
@@ -55,8 +57,13 @@ export default function MatchResultScreen() {
           if (mounted) {
             setRatingResult(nextRatingResult);
           }
-        } catch {
-          router.replace('/game');
+        } catch (error) {
+          console.warn('Failed to load MATCH result.', error);
+          if (mounted) {
+            setLoadError(
+              '保存済みスタッツを更新できませんでした。\n再読み込みしてもう一度お試しください。',
+            );
+          }
         }
       }
 
@@ -72,6 +79,12 @@ export default function MatchResultScreen() {
   return (
     <ScreenShell showNav={false}>
       <SectionTitle title="MATCH結果" subtitle="2人対戦MATCHの結果と連携候補状態です。" />
+
+      {loadError ? (
+        <Card style={styles.errorCard}>
+          <Text style={styles.errorText}>{loadError}</Text>
+        </Card>
+      ) : null}
 
       <WebResponsiveGrid>
         <Card muted style={isDesktopWeb && webGameStyles.desktopGridCard}>
@@ -216,6 +229,17 @@ const styles = StyleSheet.create({
     color: colors.primaryDark,
     fontSize: 18,
     fontWeight: '900',
+    textAlign: 'center',
+  },
+  errorCard: {
+    marginBottom: 12,
+    borderColor: colors.danger,
+  },
+  errorText: {
+    color: colors.danger,
+    fontSize: 14,
+    fontWeight: '800',
+    lineHeight: 21,
     textAlign: 'center',
   },
   detailRows: {
