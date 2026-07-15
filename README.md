@@ -69,6 +69,7 @@ npm.cmd run web -- --port 8104 --clear
 ```
 
 このコマンドはExpo Web dev serverを内部ポートで起動し、指定ポートにはSQLite Webに必要なCOEP / COOPヘッダー付きのローカルproxyを公開します。
+`/` はDartsAppの起動処理専用ルートです。AppStateとゲームDB初期化後、Account未登録でも `/home` へ進みます。
 
 Web export:
 

@@ -109,7 +109,7 @@ export default function HomeScreen() {
       <View style={[styles.header, isDesktopWeb && styles.desktopHeader]}>
         <Image source={logo} resizeMode="contain" style={styles.logo} />
         <View style={styles.headerText}>
-          <Text style={[styles.appName, { color: theme.onBackground }]}>DartsSupportApp</Text>
+          <Text style={[styles.appName, { color: theme.onBackground }]}>DartsApp</Text>
           <Text style={[styles.meta, { color: theme.onBackgroundMuted }]}>
             {profile ? levelLabels[profile.level] : 'プロフィール未設定'}
           </Text>
