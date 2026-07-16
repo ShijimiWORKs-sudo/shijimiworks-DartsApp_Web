@@ -198,6 +198,7 @@ Phase 4では、ローカルAccount、OWNER紐付け、Rating Profile、単独Ra
 Phase 5では、1人用の単独STANDARD CRICKET縦断実装を追加しています。
 Phase 6では、2人対戦MATCH縦断実装を追加しています。
 Phase 8では、PC Web横長ゲームUI、Webトップナビ、1280x720向けのゲーム画面配置を追加しています。
+Phase 10Aでは、Web / iPhone Expo Go向けのカメラ静止画撮影基盤を追加しています。撮影画像は画面セッション内だけで扱い、DB保存、クラウド送信、画像認識、スコア判定は行いません。
 
 - DBファイル名: `dartsapp_games.db`
 - 保存方式: `expo-sqlite`
@@ -206,6 +207,19 @@ Phase 8では、PC Web横長ゲームUI、Webトップナビ、1280x720向けの
 - v2 migration: `features/game/infrastructure/sqlite/migrations/002_account_rating_foundation.ts`
 - v3 migration: `features/game/infrastructure/sqlite/migrations/003_common_account_contract.ts`
 - SQL正本: `docs/specs/DartsApp_DB_v1_schema.sql`
+
+Phase 10A Camera Foundation:
+
+- route: `/camera`, `/camera/capture`, `/camera/review`, `/camera/accepted`
+- package: `expo-camera`
+- API: `CameraView`, `useCameraPermissions`
+- 初期カメラ: back
+- onCameraReady前は撮影不可
+- 前面/背面切替後は再度readyを待つ
+- 同時にmountする `CameraView` は1つだけ
+- Webではbase64画像、Nativeではcache URIを画面セッション内で扱う
+- 撮影ガイドは画面overlayのみで、画像へ焼き込まない
+- DB保存、CommonOutbox作成、クラウド送信、OpenCV/ML/スコア判定は未実装
 
 DB初期化時に以下を適用します。
 

@@ -9,6 +9,7 @@ Expo Router のルート画面を配置します。
 - `app/index.tsx`: 初期設定
 - `app/home.tsx`: ホーム、ゲーム開始/再開導線
 - `app/game*.tsx`: ゲームハブ、COUNT-UP設定/プレイ/結果、01設定/プレイ/結果、CRICKET設定/プレイ/結果、MATCH設定/プレイ/CHOICE/結果
+- `app/camera*.tsx`: Phase 10Aのカメラ撮影基盤、静止画撮影、レビュー、採用確認
 - `app/account*.tsx`: ローカルAccount登録、共通Account ID表示、Rating状態表示
 - `app/practice*.tsx`: 練習メニューと履歴
 - `app/record.tsx`: 練習記録入力
@@ -29,6 +30,7 @@ Expo Router のルート画面を配置します。
 - `ScreenShell`: SafeArea + ScrollView。PC WebではWebTopNavigationと幅制御、Expo Go/狭幅WebではBottomNavを使う
 - `BottomNav`: Expo Go/狭幅Web向けの主要5画面へのタブ導線
 - `components/web/*`: PC Web横長UI用のブレークポイント、WebTopNavigation、WebGameShell、レスポンシブグリッド
+- `components/camera/*`: カメラ権限表示、撮影ガイドoverlay、撮影画像レビュー
 - `PracticeMenuCard`: 練習メニューカード
 - `PracticeRecordForm`: 練習記録フォーム
 - `SimpleBarChart`: 軽量バーグラフ
@@ -76,6 +78,8 @@ Expo Router のルート画面を配置します。
 - `StandaloneRatingCandidateService`
 
 `AppStateContext` へ投擲履歴やMATCH履歴を混在させません。ゲームの正本は `dartsapp_games.db` のSQLite、既存MVP状態の正本はAsyncStorageです。
+
+カメラ撮影基盤はPhase 10A時点ではSQLiteとAsyncStorageへ撮影画像を書き込みません。Webのbase64画像とNativeのcache URIは、画面セッション内メモリだけで撮影、レビュー、採用確認へ渡します。
 
 ## features/game/
 
@@ -180,6 +184,19 @@ DartsApp / DartsSupportAppの将来連携に向けた外部JSON契約境界で�
 - `application/importValidator.ts`: Import JSONの検証とプレビュー
 
 内部DB型は既存のcamelCase/SQLite構造を維持し、外部境界だけsnake_caseへ変換します。Importは検証のみで、既存データの無条件上書きやDartsSupportApp通信は行いません。
+
+## features/camera/
+
+Phase 10Aでは、Web / iPhone Expo Goで使えるカメラ静止画撮影基盤を追加します。
+
+- `domain/types.ts`: permission、camera facing、runtime platform、撮影画像メタデータ
+- `application/CameraCaptureService.ts`: 権限状態解決、CameraView利用可否、撮影option、撮影画像メタデータ生成
+- `application/cameraSession.ts`: 画面セッション内だけのpending / accepted画像保持
+- `ui/useCameraSession.ts`: `CameraView`、`useCameraPermissions`、focus lifecycle、ready gating、前面/背面切替、静止画撮影
+
+初期カメラはbackです。`onCameraReady` 前は撮影できません。前面/背面切替後はreadyをfalseへ戻し、再度readyになるまで撮影を無効化します。`CameraView`は撮影画面で1つだけmountし、画面離脱時にunmountします。撮影ガイドはoverlayであり、撮影画像へ焼き込みません。
+
+Phase 10Aでは画像認識、OpenCV、ML、スコア判定、DB保存、CommonOutbox、クラウド送信、音声、動画録画は実装しません。
 
 ## features/game/domain/rating/
 
