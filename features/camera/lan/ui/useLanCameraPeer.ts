@@ -161,16 +161,24 @@ export function useLanCameraPeer(options: LanCameraPeerOptions): LanCameraPeerSt
     sendMessage(heartbeat);
   }, [cameraNodeId, latencyMs, options.role, sendMessage]);
 
-  const clearTimers = useCallback(() => {
+  const clearReconnectTimer = useCallback(() => {
     if (reconnectTimerRef.current) {
       clearTimeout(reconnectTimerRef.current);
       reconnectTimerRef.current = null;
     }
+  }, []);
+
+  const clearHeartbeatTimer = useCallback(() => {
     if (heartbeatTimerRef.current) {
       clearInterval(heartbeatTimerRef.current);
       heartbeatTimerRef.current = null;
     }
   }, []);
+
+  const clearTimers = useCallback(() => {
+    clearReconnectTimer();
+    clearHeartbeatTimer();
+  }, [clearHeartbeatTimer, clearReconnectTimer]);
 
   const disconnect = useCallback(() => {
     shouldReconnectRef.current = false;
@@ -276,6 +284,7 @@ export function useLanCameraPeer(options: LanCameraPeerOptions): LanCameraPeerSt
     }
 
     shouldReconnectRef.current = true;
+    clearReconnectTimer();
     if (startPlan.status) {
       setStatus(startPlan.status);
     }
@@ -292,8 +301,12 @@ export function useLanCameraPeer(options: LanCameraPeerOptions): LanCameraPeerSt
       return;
     }
     socketRef.current = socket;
+    const isCurrentSocket = () => socketRef.current === socket;
 
     socket.onopen = () => {
+      if (!isCurrentSocket()) {
+        return;
+      }
       reconnectAttemptRef.current = 0;
       setConnectedAt(new Date().toISOString());
       setStatus(options.role === 'game_pc' ? 'waiting' : 'connecting');
@@ -303,6 +316,9 @@ export function useLanCameraPeer(options: LanCameraPeerOptions): LanCameraPeerSt
     };
 
     socket.onmessage = (event) => {
+      if (!isCurrentSocket()) {
+        return;
+      }
       const message = parseLanCameraMessage(String(event.data));
       if (!message) {
         setLastError('不正なLAN camera messageを受信しました。');
@@ -312,16 +328,19 @@ export function useLanCameraPeer(options: LanCameraPeerOptions): LanCameraPeerSt
     };
 
     socket.onerror = () => {
+      if (!isCurrentSocket()) {
+        return;
+      }
       setLastError(getLanCameraConnectionFailureMessage());
       setStatus('error');
     };
 
     socket.onclose = () => {
-      socketRef.current = null;
-      if (heartbeatTimerRef.current) {
-        clearInterval(heartbeatTimerRef.current);
-        heartbeatTimerRef.current = null;
+      if (!isCurrentSocket()) {
+        return;
       }
+      socketRef.current = null;
+      clearHeartbeatTimer();
       pairedRef.current = false;
       setDetectionState('stopped');
       if (!shouldReconnectRef.current) {
@@ -330,9 +349,18 @@ export function useLanCameraPeer(options: LanCameraPeerOptions): LanCameraPeerSt
       const delay = calculateReconnectDelay(reconnectAttemptRef.current);
       reconnectAttemptRef.current += 1;
       setStatus('reconnecting');
+      clearReconnectTimer();
       reconnectTimerRef.current = setTimeout(connect, delay);
     };
-  }, [handleMessage, options.relayUrl, options.role, pairRequest, sendHeartbeat]);
+  }, [
+    clearHeartbeatTimer,
+    clearReconnectTimer,
+    handleMessage,
+    options.relayUrl,
+    options.role,
+    pairRequest,
+    sendHeartbeat,
+  ]);
 
   const sendCameraReady = useCallback(
     (isReady: boolean) => {

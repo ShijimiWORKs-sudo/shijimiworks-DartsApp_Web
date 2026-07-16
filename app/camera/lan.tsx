@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { AppButton } from '../../components/AppButton';
@@ -20,6 +20,7 @@ export default function LanCameraHostScreen() {
   const [pairingExpiresAt, setPairingExpiresAt] = useState(() => createPairingExpiry());
   const [relayUrl, setRelayUrl] = useState(`ws://localhost:${LAN_CAMERA_RELAY_PORT}`);
   const [enabled, setEnabled] = useState(false);
+  const [connectAfterCodeUpdate, setConnectAfterCodeUpdate] = useState(0);
   const peer = useLanCameraPeer({
     role: 'game_pc',
     relayUrl,
@@ -28,22 +29,38 @@ export default function LanCameraHostScreen() {
     pairingExpiresAt,
     enabled,
   });
+  const connectPeer = peer.connect;
   const latestCandidate = peer.candidateLog.find((entry) => entry.status === 'pending');
+  const isConnectionStarting = peer.status === 'connecting' || peer.status === 'reconnecting';
+  const isConnectionActive =
+    isConnectionStarting || peer.status === 'waiting' || peer.status === 'paired';
   const lanIpHints = useMemo(
     () => ['localhost', '127.0.0.1', 'ipconfigで確認したこのPCのIPv4'],
     [],
   );
 
+  useEffect(() => {
+    if (connectAfterCodeUpdate === 0) {
+      return;
+    }
+    connectPeer();
+    setConnectAfterCodeUpdate(0);
+  }, [connectAfterCodeUpdate, connectPeer]);
+
   const startWaiting = () => {
     setEnabled(true);
-    peer.connect();
+    connectPeer();
   };
 
   const rotatePairingCode = () => {
+    const shouldReconnect = enabled;
     peer.disconnect();
-    setEnabled(false);
     setPairingCode(createPairingCode());
     setPairingExpiresAt(createPairingExpiry());
+    setEnabled(shouldReconnect);
+    if (shouldReconnect) {
+      setConnectAfterCodeUpdate((current) => current + 1);
+    }
   };
 
   return (
@@ -81,9 +98,9 @@ export default function LanCameraHostScreen() {
         <Text style={styles.meta}>有効期限: {formatDateTime(pairingExpiresAt)}</Text>
         <View style={styles.actionRow}>
           <AppButton
-            label="接続待受開始"
+            label={isConnectionStarting ? '接続待受中...' : '接続待受開始'}
             onPress={startWaiting}
-            disabled={peer.status === 'paired'}
+            disabled={isConnectionActive}
           />
           <AppButton label="コード更新" onPress={rotatePairingCode} variant="secondary" />
         </View>
@@ -101,6 +118,7 @@ export default function LanCameraHostScreen() {
         <InfoRow label="Pairing完了" value={formatDateTime(peer.pairedAt)} />
         <InfoRow label="最終heartbeat" value={formatDateTime(peer.lastHeartbeatAt)} />
         <InfoRow label="推定latency" value={peer.latencyMs == null ? '-' : `${peer.latencyMs}ms`} />
+        <InfoRow label="lastError" value={peer.lastError ?? '-'} />
         <Text style={styles.warning}>
           複数Node接続時は自動選択しません。開発段階では2台目を拒否します。
         </Text>

@@ -39,7 +39,7 @@ export default function LanCameraNodeScreen() {
   const isLocalhost = isRunningOnLocalhost();
   const { sendCameraReady, status } = lanPeer;
   const isConnectionStarting = status === 'connecting' || status === 'reconnecting';
-  const isConnectDisabled = pairingCode.length !== 6 || isConnectionStarting;
+  const isConnectDisabled = pairingCode.length !== 6 || isConnectionStarting || status === 'paired';
 
   useEffect(() => {
     void loadLanCameraNodeSettings().then((settings) => {
@@ -142,6 +142,7 @@ export default function LanCameraNodeScreen() {
           label="latency"
           value={lanPeer.latencyMs == null ? '-' : `${lanPeer.latencyMs}ms`}
         />
+        <InfoRow label="lastError" value={lanPeer.lastError ?? '-'} />
         {lanPeer.lastError ? <Text style={styles.errorText}>{lanPeer.lastError}</Text> : null}
       </Card>
 
