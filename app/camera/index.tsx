@@ -17,6 +17,16 @@ export default function CameraIntroScreen() {
       />
       <Card>
         <SectionTitle
+          title="Phase 10C Camera Home"
+          subtitle="LAN未接続の判定プレビュー、このPCでゲーム、ゲームPC接続、アワード確認へ進みます。"
+          tone="card"
+        />
+        <View style={{ marginTop: 14 }}>
+          <AppButton label="Camera Homeへ" onPress={() => router.push('/camera/home')} />
+        </View>
+      </Card>
+      <Card>
+        <SectionTitle
           title="Phase 10B LAN Camera Node"
           subtitle="ゲームPCでRelayを待ち受け、同じWi-Fi上のCamera Nodeからテスト判定候補だけを受信します。映像はLAN送信しません。"
           tone="card"
