@@ -6,7 +6,7 @@ DartsSupportApp MVP v0.1 の構成メモです。
 
 Expo Router のルート画面を配置します。
 
-- `app/index.tsx`: 初期設定
+- `app/index.tsx`: DartsApp起動処理
 - `app/home.tsx`: ホーム、ゲーム開始/再開導線
 - `app/game*.tsx`: ゲームハブ、COUNT-UP設定/プレイ/結果、01設定/プレイ/結果、CRICKET設定/プレイ/結果、MATCH設定/プレイ/CHOICE/結果
 - `app/account*.tsx`: ローカルAccount登録、共通Account ID表示、Rating状態表示
@@ -74,6 +74,7 @@ Expo Router のルート画面を配置します。
 - `MatchGameService`
 - `AccountService`
 - `StandaloneRatingCandidateService`
+- `RatingApplicationService`
 
 `AppStateContext` へ投擲履歴やMATCH履歴を混在させません。ゲームの正本は `dartsapp_games.db` のSQLite、既存MVP状態の正本はAsyncStorageです。
 
@@ -89,6 +90,8 @@ Phase 2ではCOUNT-UPの縦断実装を追加しています。Phase 3では単�
 
 Phase 8ではゲームルール、DB、migrationを変更せず、PC Webだけに横長UIを追加します。1024px以上のWebではHOME / GAME / ACCOUNTのトップナビを使い、COUNT-UP、01、CRICKET、MATCHのプレイ画面はスコア/状態カラムと入力/操作カラムに分けます。Expo Goと1024px未満のWebでは既存の縦積みUIとBottomNavを維持します。
 
+Phase 9ではmigrationを追加せず、既存の `rating_evaluations` をDartsApp Rating Engine v2へ適用します。計算本体は純粋TypeScriptで、`RatingApplicationService` がpending EvaluationをAccount単位で直列化し、`SqliteRatingRepository` が `runGameDatabaseTransaction` 内でObservation読込、Snapshot作成、Profile更新、`rating_recalculate` Outbox完了を行います。
+
 SQLite DB:
 
 - ファイル名: `dartsapp_games.db`
@@ -96,7 +99,7 @@ SQLite DB:
 - v1: 19テーブル、Outbox、投擲の `client_action_id` 冪等制約、進行中GAME/MATCHの一意制約
 - v2: Account、OWNER紐付け、Rating Profile、Rating Evaluation v2、Rating Snapshot v2、migration orphan保存
 - v3: 共通Account契約用 `common_events`、`common_outbox`、段階的移行用 `accounts.legacy_account_id`
-- Phase 6ではmigration 004を追加せず、`PRAGMA user_version = 3` を維持
+- Phase 6〜9ではmigration 004を追加せず、`PRAGMA user_version = 3` を維持
 - SQL正本: `docs/specs/DartsApp_DB_v1_schema.sql`
 
 COUNT-UP:
@@ -122,7 +125,7 @@ COUNT-UP:
 - `integration_outbox` は `practice_record_upsert` をpendingで作成し、consumerは後続フェーズに残す
 - 初回Rating確定前は `rating_candidate = 0`
 - 初回Rating確定後、Account OWNERの完了ゲームは `rating_candidate = 1` とし、pending `rating_evaluations` と `rating_recalculate` Outboxを作成する
-- Rating計算本体とSnapshot適用はPhase 4では実行しない
+- Phase 9ではpending Evaluation適用時に01 Indexだけを更新し、Cricket IndexとMatch Indexは維持する
 
 単独STANDARD CRICKET:
 
@@ -136,7 +139,7 @@ COUNT-UP:
 - undo/redoは `darts.status` を `active` / `voided` に更新し、物理削除しない
 - 完了時に `game_player_results`、`integration_outbox`、`practice_record_links` を作成する
 - 初回Rating確定後、Account OWNERの完了ゲームは `source_type = 'standalone_cricket'` のpending `rating_evaluations` と `rating_recalculate` Outboxを作成する
-- Rating計算本体とSnapshot適用はPhase 5では実行しない
+- Phase 9ではpending Evaluation適用時にCricket Indexだけを更新し、01 IndexとMatch Indexは維持する
 
 2人対戦MATCH:
 
@@ -152,7 +155,7 @@ COUNT-UP:
 - undo/redoは画面セッション内だけRedo候補を持ち、DBでは `darts.status` を `active` / `voided` に更新して物理削除しない
 - MATCHは初回Rating確定前でもOWNER Playerの `source_type = 'match'` 評価候補を作成する
 - GUEST PlayerにはRating Evaluation、Rating Profile、Rating Snapshotを作成しない
-- Rating計算本体とSnapshot適用、DartsSupportApp通信はPhase 6では実行しない
+- Phase 9ではMATCH Evaluationを初回3件確定とMATCH Index更新に使用する。DartsSupportApp通信は実行しない
 
 ## features/account/
 
@@ -183,12 +186,19 @@ DartsApp / DartsSupportAppの将来連携に向けた外部JSON契約境界で�
 
 ## features/game/domain/rating/
 
-Phase 4ではRating計算本体ではなく、評価候補判定の境界を追加します。
+Phase 9ではRating候補判定に加え、DartsApp独自Rating Engine v2を実装します。
 
-- MATCHは初回3件でRatingを確定する将来評価元
+- MATCHは初回3件でRatingを確定する評価元
 - 単独01と単独CRICKETはRating確定後だけ評価候補
 - COUNT-UP、道場、CRICKET COUNT-UPは対象外
 - 除外理由は `ACCOUNT_NOT_REGISTERED`、`OWNER_NOT_LINKED`、`INITIAL_RATING_NOT_ESTABLISHED` などのreason codeで扱う
+- Rating範囲は1.0〜18.0で、`rating_tenths` と `precise_rating_milli` を保存する
+- MATCHは01 Index、Cricket Index、Match Index、安定性補正、継続ボーナスを更新する
+- 単独01は01 Indexのみ、単独CRICKETはCricket Indexのみを更新し、単独1件の総合Rating変動は±0.2以内に制限する
+- 初回確定前の単独ゲームは遡及利用しない
+- GUESTにはRating Profile、Evaluation、Snapshotを作らない
+- source revision再計算では古いEvaluation revisionと対象時点以降のSnapshotを無効化し、最新Evaluationを時系列にReplayしてProfileを最終Snapshotへ揃える
+- `/account/rating` は現在値、`/account/rating/history` は有効Snapshot履歴、各ゲーム結果画面はsource Evaluation/Snapshotに基づくRating結果を表示する
 
 `rating_evaluations` は `source_type = match | standalone_zero_one | standalone_cricket` を保持します。単独ゲームは `source_weight_milli = 500`、MATCHは `1000` です。
 
@@ -226,6 +236,8 @@ Node.js built-in test runner で pure TypeScript ロジックを検証します�
 - CRICKETサービスとSQLite永続化
 - MATCHドメイン計算
 - MATCHサービスとSQLite永続化
+- Rating Engine v2の純粋計算
+- Rating EvaluationからSnapshot/Profileへの適用
 - データ整合性
 - 資料検索
 

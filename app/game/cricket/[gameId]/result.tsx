@@ -4,6 +4,7 @@ import { StyleSheet, Text, View } from 'react-native';
 
 import { AppButton } from '../../../../components/AppButton';
 import { Card } from '../../../../components/Card';
+import { RatingResultCard } from '../../../../components/game/RatingResultCard';
 import { ScreenShell } from '../../../../components/ScreenShell';
 import { SectionTitle } from '../../../../components/SectionTitle';
 import { useDesktopWebLayout } from '../../../../components/web/useDesktopWebLayout';
@@ -11,6 +12,7 @@ import { WebResponsiveGrid, webGameStyles } from '../../../../components/web/Web
 import { colors } from '../../../../constants/theme';
 import { useGameDatabase } from '../../../../contexts/GameDatabaseContext';
 import type { CricketGameState, CricketResult } from '../../../../features/game/domain/cricket';
+import type { RatingSourceResult } from '../../../../features/game/application/ports';
 
 export default function CricketResultScreen() {
   const router = useRouter();
@@ -19,6 +21,7 @@ export default function CricketResultScreen() {
   const { services } = useGameDatabase();
   const isDesktopWeb = useDesktopWebLayout();
   const [game, setGame] = useState<CricketGameState | null>(null);
+  const [ratingResult, setRatingResult] = useState<RatingSourceResult | null>(null);
 
   useFocusEffect(
     useCallback(() => {
@@ -41,6 +44,13 @@ export default function CricketResultScreen() {
           }
           if (mounted) {
             setGame(nextGame);
+          }
+          await services.rating.processPending();
+          const nextRatingResult = await services.rating.getRatingResultForSource({
+            sourceGameId: nextGame.gameId,
+          });
+          if (mounted) {
+            setRatingResult(nextRatingResult);
           }
         } catch {
           router.replace('/game');
@@ -101,10 +111,10 @@ export default function CricketResultScreen() {
         <Card style={isDesktopWeb && webGameStyles.desktopGridCard}>
           <SectionTitle title="連携状態" tone="card" />
           <Text style={styles.outboxText}>{formatOutbox(result?.outboxStatus ?? null)}</Text>
-          <Text style={styles.ratingText}>
-            Rating計算本体は未実装です。対象条件を満たす単独CRICKETは候補として保存されます。
-          </Text>
+          <Text style={styles.ratingText}>Rating対象条件と評価結果はRating欄で確認できます。</Text>
         </Card>
+
+        <RatingResultCard result={ratingResult} />
       </WebResponsiveGrid>
 
       <View style={[styles.actions, isDesktopWeb && webGameStyles.desktopFooterActions]}>

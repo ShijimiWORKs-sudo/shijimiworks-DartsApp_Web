@@ -1,10 +1,15 @@
+import { useRouter } from 'expo-router';
 import { StyleSheet, Text, View } from 'react-native';
 
+import { AppButton } from '../AppButton';
 import { Card } from '../Card';
 import { SectionTitle } from '../SectionTitle';
 import { colors } from '../../constants/theme';
 import type { AccountOverview } from '../../features/account/domain';
 import {
+  formatConfidence,
+  formatEvaluatedAt,
+  formatRatingIndex,
   formatRatingTenths,
   getEligibleMatchProgress,
   getRatingMeasurementLabel,
@@ -15,6 +20,7 @@ type RatingStatusCardProps = {
 };
 
 export function RatingStatusCard({ overview }: RatingStatusCardProps) {
+  const router = useRouter();
   const profile = overview.ratingProfile;
   const standaloneEligible = profile.establishedAt !== null;
   const ratingLabel = formatRatingTenths(profile.ratingTenths);
@@ -34,18 +40,40 @@ export function RatingStatusCard({ overview }: RatingStatusCardProps) {
           value={getEligibleMatchProgress(profile.eligibleMatchCount)}
         />
         <Metric label="DartsApp Rating" value={ratingLabel} />
+        <Metric label="Confidence" value={formatConfidence(profile.confidenceBp)} />
         <Metric
           label="単独Rating"
           value={standaloneEligible ? '対象可' : '対象外'}
           emphasis={standaloneEligible}
         />
+        <Metric label="01 Index" value={formatRatingIndex(profile.zeroOneIndexMilli)} />
+        <Metric label="Cricket Index" value={formatRatingIndex(profile.cricketIndexMilli)} />
+        <Metric label="Match Index" value={formatRatingIndex(profile.matchIndexMilli)} />
+        <Metric
+          label="単独01 / CRICKET"
+          value={`${profile.eligibleStandaloneZeroOneCount} / ${profile.eligibleStandaloneCricketCount}`}
+        />
+        <Metric label="最終評価" value={formatEvaluatedAt(profile.lastEvaluatedAt)} />
       </View>
 
       <Text style={styles.note}>
         {standaloneEligible
-          ? '単独01はRating更新候補になります。Rating計算本体は今後のフェーズで適用されます。'
+          ? '独自方式による参考値です。単独01とCRICKETは初回Rating確定後のゲームだけを更新対象にします。'
           : '単独01・CRICKETは初回3MATCH確定後のゲームからRating対象になります。'}
       </Text>
+
+      <View style={styles.actions}>
+        <AppButton
+          label="Rating詳細を見る"
+          onPress={() => router.push('/account/rating')}
+          variant="secondary"
+        />
+        <AppButton
+          label="Rating履歴を見る"
+          onPress={() => router.push('/account/rating/history')}
+          variant="secondary"
+        />
+      </View>
     </Card>
   );
 }
@@ -107,5 +135,9 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     fontSize: 13,
     lineHeight: 20,
+  },
+  actions: {
+    gap: 10,
+    marginTop: 14,
   },
 });

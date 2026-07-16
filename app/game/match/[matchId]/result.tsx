@@ -4,6 +4,7 @@ import { StyleSheet, Text, View } from 'react-native';
 
 import { AppButton } from '../../../../components/AppButton';
 import { Card } from '../../../../components/Card';
+import { RatingResultCard } from '../../../../components/game/RatingResultCard';
 import { ScreenShell } from '../../../../components/ScreenShell';
 import { SectionTitle } from '../../../../components/SectionTitle';
 import { useDesktopWebLayout } from '../../../../components/web/useDesktopWebLayout';
@@ -11,6 +12,7 @@ import { WebResponsiveGrid, webGameStyles } from '../../../../components/web/Web
 import { colors } from '../../../../constants/theme';
 import { useGameDatabase } from '../../../../contexts/GameDatabaseContext';
 import type { MatchResultSummary, MatchState } from '../../../../features/game/domain/match';
+import type { RatingSourceResult } from '../../../../features/game/application/ports';
 
 export default function MatchResultScreen() {
   const router = useRouter();
@@ -19,6 +21,8 @@ export default function MatchResultScreen() {
   const { services } = useGameDatabase();
   const isDesktopWeb = useDesktopWebLayout();
   const [match, setMatch] = useState<MatchState | null>(null);
+  const [ratingResult, setRatingResult] = useState<RatingSourceResult | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useFocusEffect(
     useCallback(() => {
@@ -27,6 +31,7 @@ export default function MatchResultScreen() {
       async function loadMatch() {
         if (!services || !matchId) return;
         try {
+          if (mounted) setLoadError(null);
           const nextMatch = await services.match.loadMatch(matchId);
           if (nextMatch.status === 'in_progress' || nextMatch.status === 'paused') {
             router.replace(`/game/match/${nextMatch.matchId}`);
@@ -36,9 +41,29 @@ export default function MatchResultScreen() {
             router.replace('/game');
             return;
           }
-          if (mounted) setMatch(nextMatch);
-        } catch {
-          router.replace('/game');
+          const repairResult = await services.match.ensureRatingEvaluationCurrent(
+            nextMatch.matchId,
+          );
+          if (repairResult.recalculationRequired && repairResult.evaluationId) {
+            await services.rating.recalculateFromEvaluation(repairResult.evaluationId);
+          } else {
+            await services.rating.processPending();
+          }
+          const displayMatch = await services.match.loadMatch(nextMatch.matchId);
+          if (mounted) setMatch(displayMatch);
+          const nextRatingResult = await services.rating.getRatingResultForSource({
+            sourceMatchId: nextMatch.matchId,
+          });
+          if (mounted) {
+            setRatingResult(nextRatingResult);
+          }
+        } catch (error) {
+          console.warn('Failed to load MATCH result.', error);
+          if (mounted) {
+            setLoadError(
+              '保存済みスタッツを更新できませんでした。\n再読み込みしてもう一度お試しください。',
+            );
+          }
         }
       }
 
@@ -54,6 +79,12 @@ export default function MatchResultScreen() {
   return (
     <ScreenShell showNav={false}>
       <SectionTitle title="MATCH結果" subtitle="2人対戦MATCHの結果と連携候補状態です。" />
+
+      {loadError ? (
+        <Card style={styles.errorCard}>
+          <Text style={styles.errorText}>{loadError}</Text>
+        </Card>
+      ) : null}
 
       <WebResponsiveGrid>
         <Card muted style={isDesktopWeb && webGameStyles.desktopGridCard}>
@@ -81,6 +112,7 @@ export default function MatchResultScreen() {
             <ResultStat label="Games" value={result?.gameIds.length ?? 0} />
             <ResultStat label="Darts" value={result?.totalDarts ?? 0} />
             <ResultStat label="01 PPD" value={formatMilli(result?.zeroOnePpdMilli)} />
+            <ResultStat label="01 3DA" value={formatMilli(result?.zeroOneThreeDartAverageMilli)} />
             <ResultStat label="CR MPR" value={formatMilli(result?.cricketMprMilli)} />
             <ResultStat label="Bull" value={result?.bullCount ?? 0} />
             <ResultStat label="Triple" value={result?.tripleCount ?? 0} />
@@ -91,9 +123,11 @@ export default function MatchResultScreen() {
 
         <Card style={isDesktopWeb && webGameStyles.desktopGridCard}>
           <SectionTitle title="連携状態" tone="card" />
-          <Text style={styles.outboxText}>{formatRating(result)}</Text>
+          <Text style={styles.outboxText}>{formatRating(result, ratingResult)}</Text>
           <Text style={styles.outboxText}>{formatOutbox(result)}</Text>
         </Card>
+
+        <RatingResultCard result={ratingResult} />
       </WebResponsiveGrid>
 
       <View style={[styles.actions, isDesktopWeb && webGameStyles.desktopFooterActions]}>
@@ -147,9 +181,26 @@ function formatMilli(value: number | null | undefined) {
   return value === null || value === undefined ? '-' : (value / 1000).toFixed(2);
 }
 
-function formatRating(result: MatchResultSummary | null | undefined) {
+function formatRating(
+  result: MatchResultSummary | null | undefined,
+  ratingResult: RatingSourceResult | null,
+) {
+  if (ratingResult) {
+    if (ratingResult.status === 'applied') {
+      return ratingResult.isInitialEstablished
+        ? '初回Rating確定として反映済みです。'
+        : '参考Rating更新として反映済みです。';
+    }
+    if (ratingResult.status === 'processing') {
+      return 'Rating評価処理中です。';
+    }
+    if (ratingResult.status === 'excluded' || ratingResult.status === 'not_target') {
+      return ratingResult.message;
+    }
+  }
+
   return result?.ratingCandidate
-    ? 'OWNER PlayerのRating Evaluation v2候補として保存済みです。'
+    ? 'Rating Evaluation v2候補として保存済みです。'
     : 'Rating候補は作成されていません。';
 }
 
@@ -178,6 +229,17 @@ const styles = StyleSheet.create({
     color: colors.primaryDark,
     fontSize: 18,
     fontWeight: '900',
+    textAlign: 'center',
+  },
+  errorCard: {
+    marginBottom: 12,
+    borderColor: colors.danger,
+  },
+  errorText: {
+    color: colors.danger,
+    fontSize: 14,
+    fontWeight: '800',
+    lineHeight: 21,
     textAlign: 'center',
   },
   detailRows: {

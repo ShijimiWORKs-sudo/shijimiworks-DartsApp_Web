@@ -46,3 +46,23 @@ export function formatRatingTenths(ratingTenths: number | null) {
 export function getEligibleMatchProgress(eligibleMatchCount: number) {
   return `${Math.min(eligibleMatchCount, 3)}/3`;
 }
+
+export function formatRatingIndex(indexMilli: number | null) {
+  return indexMilli === null ? '-' : `${(indexMilli / 1000).toFixed(2)}`;
+}
+
+export function formatConfidence(confidenceBp: number) {
+  return `${(confidenceBp / 100).toFixed(1)}%`;
+}
+
+export function formatEvaluatedAt(value: string | null) {
+  if (!value) {
+    return '-';
+  }
+  return new Intl.DateTimeFormat('ja-JP', {
+    month: 'numeric',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(value));
+}

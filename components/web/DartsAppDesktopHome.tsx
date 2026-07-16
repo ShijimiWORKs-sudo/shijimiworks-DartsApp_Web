@@ -11,6 +11,7 @@ import { AppButton } from '../AppButton';
 import { Card } from '../Card';
 import { SectionTitle } from '../SectionTitle';
 import {
+  formatConfidence,
   formatRatingTenths,
   getAccountStatusLabel,
   getEligibleMatchProgress,
@@ -164,7 +165,7 @@ export function DartsAppDesktopHome({
             <InfoRow label="保存先" value="端末内SQLite" />
           </View>
           <Text style={styles.note}>
-            Rating計算本体、音源、動画、カメラ判定は未実装です。ゲーム進行と結果保存を優先しています。
+            Ratingは端末内で計算・保存されます。音源、動画、カメラ判定は未実装です。
           </Text>
         </Card>
       </View>
@@ -224,6 +225,8 @@ function AccountOverviewCard({
 }
 
 function RatingOverviewCard({ accountOverview }: { accountOverview: AccountOverview | null }) {
+  const router = useRouter();
+
   if (!accountOverview) {
     return (
       <Card>
@@ -236,7 +239,15 @@ function RatingOverviewCard({ accountOverview }: { accountOverview: AccountOverv
           <InfoRow label="測定状態" value="未測定" />
           <InfoRow label="Eligible MATCH" value="0/3" />
           <InfoRow label="DartsApp Rating" value="未確定" />
+          <InfoRow label="Confidence" value="0.0%" />
           <InfoRow label="単独Rating" value="対象外" />
+        </View>
+        <View style={styles.cardAction}>
+          <AppButton
+            label="Rating詳細を見る"
+            onPress={() => router.push('/account/rating')}
+            variant="secondary"
+          />
         </View>
       </Card>
     );
@@ -257,7 +268,15 @@ function RatingOverviewCard({ accountOverview }: { accountOverview: AccountOverv
           value={getEligibleMatchProgress(profile.eligibleMatchCount)}
         />
         <InfoRow label="DartsApp Rating" value={formatRatingTenths(profile.ratingTenths)} />
+        <InfoRow label="Confidence" value={formatConfidence(profile.confidenceBp)} />
         <InfoRow label="単独Rating" value={profile.establishedAt ? '対象可' : '対象外'} />
+      </View>
+      <View style={styles.cardAction}>
+        <AppButton
+          label="Rating詳細を見る"
+          onPress={() => router.push('/account/rating')}
+          variant="secondary"
+        />
       </View>
     </Card>
   );

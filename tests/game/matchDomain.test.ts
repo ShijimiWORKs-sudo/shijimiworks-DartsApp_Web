@@ -256,13 +256,92 @@ test('MATCH result summary aggregates games, PPD, MPR, darts, and manual flag', 
 
   assert.equal(summary.gamesWon[PLAYER_1], 1);
   assert.equal(summary.gamesWon[PLAYER_2], 1);
-  assert.equal(summary.zeroOnePpdMilli, 30000);
+  assert.equal(summary.zeroOnePpdMilli, 15000);
+  assert.equal(summary.zeroOneThreeDartAverageMilli, 45000);
   assert.equal(summary.cricketMprMilli, 3000);
   assert.equal(summary.totalDarts, 3);
   assert.equal(summary.tripleCount, 3);
   assert.equal(summary.bustCount, 1);
   assert.equal(summary.manualWinner, true);
   assert.equal(summary.commonOutboxStatus, 'local_only');
+});
+
+test('MATCH result summary uses rating darts and weighted 01 PPD across games', () => {
+  const summary = summarizeMatchResult({
+    players: createMatchPlayers(),
+    ratingCandidate: true,
+    games: [
+      createGame({
+        gameNo: 1,
+        winnerPlayerId: PLAYER_1,
+        turns: [
+          zeroOneTurn(PLAYER_1, 1, {
+            appliedScore: 40,
+            darts: [
+              dart(1, 'single', 20),
+              dart(2, 'single', 20),
+              { ...dart(3, 'triple', 20), status: 'voided' },
+            ],
+          }),
+          zeroOneTurn(PLAYER_2, 2, {
+            status: 'bust',
+            appliedScore: 0,
+            isBust: true,
+            darts: [dart(1, 'triple', 20), dart(2, 'single', 20)],
+          }),
+        ],
+      }),
+      createGame({
+        gameNo: 3,
+        winnerPlayerId: PLAYER_1,
+        turns: [
+          zeroOneTurn(PLAYER_1, 3, {
+            status: 'checkout',
+            appliedScore: 50,
+            isCheckout: true,
+            darts: [dart(1, 'inner_bull', null)],
+          }),
+        ],
+      }),
+    ],
+  });
+
+  assert.equal(summary.zeroOnePpdMilli, 15000);
+  assert.equal(summary.zeroOneThreeDartAverageMilli, 45000);
+  assert.equal(summary.totalDarts, 5);
+});
+
+test('MATCH 01 PPD stays within the physical maximum for 501 in 9 darts', () => {
+  const summary = summarizeMatchResult({
+    players: createMatchPlayers(),
+    ratingCandidate: true,
+    games: [
+      createGame({
+        gameNo: 1,
+        winnerPlayerId: PLAYER_1,
+        turns: [
+          zeroOneTurn(PLAYER_1, 1, {
+            appliedScore: 180,
+            darts: [dart(1, 'triple', 20), dart(2, 'triple', 20), dart(3, 'triple', 20)],
+          }),
+          zeroOneTurn(PLAYER_1, 3, {
+            appliedScore: 180,
+            darts: [dart(1, 'triple', 20), dart(2, 'triple', 20), dart(3, 'triple', 20)],
+          }),
+          zeroOneTurn(PLAYER_1, 5, {
+            status: 'checkout',
+            appliedScore: 141,
+            isCheckout: true,
+            darts: [dart(1, 'triple', 20), dart(2, 'triple', 19), dart(3, 'double', 12)],
+          }),
+        ],
+      }),
+    ],
+  });
+
+  assert.equal(summary.zeroOnePpdMilli, 55667);
+  assert.equal(summary.zeroOneThreeDartAverageMilli, 167000);
+  assert.ok((summary.zeroOnePpdMilli ?? 0) <= 60000);
 });
 
 function createMatchPlayers(): MatchPlayerState[] {

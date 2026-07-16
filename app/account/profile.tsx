@@ -1,5 +1,5 @@
-import { useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { useRouter } from 'expo-router';
+import { useCallback, useEffect, useState } from 'react';
 import { Alert, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { AppButton } from '../../components/AppButton';
@@ -12,68 +12,41 @@ import { SectionTitle } from '../../components/SectionTitle';
 import { useDesktopWebLayout } from '../../components/web/useDesktopWebLayout';
 import { webGameStyles } from '../../components/web/WebGameShell';
 import { colors } from '../../constants/theme';
-import { useAppState } from '../../contexts/AppStateContext';
 import { useGameDatabase } from '../../contexts/GameDatabaseContext';
-import type { AccountServicePort } from '../../features/account/application/AccountServicePort';
-import type { AccountOverview } from '../../features/account/domain';
-
-type AccountAppState = ReturnType<typeof useAppState> & {
-  activeAccountId?: string | null;
-};
-
-type ServicesWithAccount = {
-  account?: AccountServicePort;
-};
+import { useActiveAccountOverview } from '../../hooks/useActiveAccountOverview';
 
 export default function AccountProfileScreen() {
   const router = useRouter();
-  const appState = useAppState() as AccountAppState;
   const { services } = useGameDatabase();
   const isDesktopWeb = useDesktopWebLayout();
-  const accountService = (services as ServicesWithAccount | null)?.account ?? null;
-  const activeAccountId = appState.activeAccountId ?? null;
-  const [overview, setOverview] = useState<AccountOverview | null>(null);
+  const {
+    errorMessage: accountErrorMessage,
+    isResolving,
+    overview,
+    reload,
+    status: accountStatus,
+  } = useActiveAccountOverview();
   const [displayName, setDisplayName] = useState('');
   const [email, setEmail] = useState('');
-  const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const loadAccount = useCallback(async () => {
-    setIsLoading(true);
-    setErrorMessage(null);
-
-    if (!accountService) {
-      setOverview(null);
-      setIsLoading(false);
+  useEffect(() => {
+    if (!overview) {
       return;
     }
+    setDisplayName(overview.account.displayName);
+    setEmail(overview.account.emailNormalized ?? '');
+  }, [overview]);
 
-    try {
-      const nextOverview = await accountService.getActiveAccount(activeAccountId);
-      if (!nextOverview) {
-        router.replace('/account/register');
-        return;
-      }
-
-      setOverview(nextOverview);
-      setDisplayName(nextOverview.account.displayName);
-      setEmail(nextOverview.account.emailNormalized ?? '');
-    } catch (error) {
-      setErrorMessage(getErrorMessage(error));
-    } finally {
-      setIsLoading(false);
+  useEffect(() => {
+    if (accountStatus === 'unregistered') {
+      router.replace('/account/register');
     }
-  }, [accountService, activeAccountId, router]);
-
-  useFocusEffect(
-    useCallback(() => {
-      void loadAccount();
-    }, [loadAccount]),
-  );
+  }, [accountStatus, router]);
 
   const handleSave = useCallback(async () => {
-    if (!accountService || !overview || isSaving) {
+    if (!services?.account || !overview || isSaving) {
       return;
     }
 
@@ -81,13 +54,13 @@ export default function AccountProfileScreen() {
     setErrorMessage(null);
 
     try {
-      const nextOverview = await accountService.updateProfile(overview.account.id, {
+      const nextOverview = await services.account.updateProfile(overview.account.id, {
         displayName,
         email,
       });
-      setOverview(nextOverview);
       setDisplayName(nextOverview.account.displayName);
       setEmail(nextOverview.account.emailNormalized ?? '');
+      reload();
       Alert.alert('保存しました', 'Accountプロフィールを更新しました。');
     } catch (error) {
       const message = getErrorMessage(error);
@@ -96,7 +69,7 @@ export default function AccountProfileScreen() {
     } finally {
       setIsSaving(false);
     }
-  }, [accountService, displayName, email, isSaving, overview]);
+  }, [displayName, email, isSaving, overview, reload, services]);
 
   return (
     <ScreenShell>
@@ -104,7 +77,7 @@ export default function AccountProfileScreen() {
 
       <AccountLocalNotice />
 
-      {!accountService ? (
+      {accountStatus === 'database_loading' ? (
         <Card muted>
           <Text style={styles.message}>Accountサービスの接続を待っています。</Text>
         </Card>
@@ -167,12 +140,14 @@ export default function AccountProfileScreen() {
       ) : (
         <Card muted>
           <Text style={styles.message}>
-            {isLoading ? 'Accountを読み込んでいます。' : 'Account登録が必要です。'}
+            {getMissingAccountMessage(isResolving, accountErrorMessage)}
           </Text>
         </Card>
       )}
 
-      {errorMessage ? <Text style={styles.error}>{errorMessage}</Text> : null}
+      {accountErrorMessage || errorMessage ? (
+        <Text style={styles.error}>{errorMessage ?? accountErrorMessage}</Text>
+      ) : null}
 
       <View style={[styles.actions, isDesktopWeb && webGameStyles.desktopFooterActions]}>
         <AppButton
@@ -195,6 +170,16 @@ export default function AccountProfileScreen() {
 
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : '不明なエラーです。';
+}
+
+function getMissingAccountMessage(isResolving: boolean, errorMessage: string | null) {
+  if (isResolving) {
+    return 'Accountを読み込んでいます。';
+  }
+  if (errorMessage) {
+    return 'Accountを読み込めませんでした。';
+  }
+  return 'Account登録が必要です。';
 }
 
 function InfoRow({ label, value }: { label: string; value: string }) {
