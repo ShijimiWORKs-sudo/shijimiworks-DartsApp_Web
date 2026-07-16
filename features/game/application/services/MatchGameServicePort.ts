@@ -5,6 +5,7 @@ import type {
   MatchStartInput,
   MatchState,
 } from '../../domain/match';
+import type { MatchDiagnosticReport, MatchRepairResult } from './MatchDiagnostics';
 
 export type MatchLastSettings = {
   zeroOneStartScore: MatchStartInput['zeroOneStartScore'];
@@ -31,8 +32,6 @@ export type MatchGameServicePort = {
   pauseMatch(matchId: string): Promise<MatchState>;
   resumeMatch(matchId: string): Promise<MatchState>;
   abortMatch(matchId: string): Promise<void>;
-  ensureRatingEvaluationCurrent(matchId: string): Promise<{
-    evaluationId: string | null;
-    recalculationRequired: boolean;
-  }>;
+  getMatchDiagnostics(matchId: string): Promise<MatchDiagnosticReport>;
+  ensureRatingEvaluationCurrent(matchId: string): Promise<MatchRepairResult>;
 };

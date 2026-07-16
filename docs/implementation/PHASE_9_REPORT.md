@@ -29,6 +29,7 @@ Implemented:
 - MATCH Rating observations use weighted effective score / Rating darts across all 01 games
 - Out-of-range Rating observations are excluded with `INVALID_PPD_RANGE` or `INVALID_MPR_RANGE`
 - Natural MATCH 01 CHECKOUT games count the final checkout darts and do not duplicate turn scores through dart joins
+- Development-only MATCH Rating diagnostics at `/dev/match-diagnostics/[matchId]` read the active SQLite database and expose raw rows, canonical stats, mismatches, JSON copy, and an explicit repair button
 
 Not implemented in this phase:
 
@@ -106,6 +107,16 @@ MATCH observation repair:
 - Re-running the repair after canonical rows and latest Evaluation are aligned is idempotent and does not create another revision
 - Existing Account and user data are not deleted
 
+MATCH diagnostic / repair screen:
+
+- `/dev/match-diagnostics/[matchId]` is not linked from production user navigation
+- The screen reads the same SQLite connection used by the running app, including Web SQLite in the browser
+- It displays MATCH rows, GAME rows, OWNER TURN rows, all DART rows, saved result rows, all Rating Evaluation revisions, Evaluation Games, Snapshots, and Rating Profile rows
+- It computes canonical OWNER totals from raw TURN/DART rows and lists mismatches against saved `game_player_results`, `match_player_results`, `rating_evaluations`, `rating_evaluation_games`, Snapshot, and Profile state
+- The diagnostic JSON copy excludes Account email/profile personal fields by not dumping Account rows
+- The explicit repair button runs MATCH stats repair first, then Rating recalculation, reloads diagnostics, and treats remaining mismatches as failure
+- `ensureRatingEvaluationCurrent` returns before/after summaries and logs `[MATCH repair before]` and `[MATCH repair after]` for browser console inspection
+
 ## UI
 
 `/account/rating-status`, `/account/rating`, `/account/rating/history`, Home, and Game Hub now display updated Rating Profile values after pending processing:
@@ -180,7 +191,8 @@ Added coverage:
 - Legacy MATCH repair covers `turns.dart_count = 3` with only 2 active DART rows, restoring 501-in-9 PPD to `55667`, 3DA to `167000`, and MATCH total darts to 18 in the service-level fixture
 - Legacy MATCH repair covers a final 01 CHECKOUT TURN stored as `game_end`, ensuring the final 141-point turn is included in effective score and Rating darts
 - MATCH result repair failures stay on the result screen with a generic retry message while logging the original error with `console.warn`
+- MATCH diagnostics route exists, shows OWNER TURN rows, DART rows, saved Rating rows, JSON copy, explicit repair, before/after summaries, and source revision idempotency
 
 Final test suite result during implementation:
 
-- `npm.cmd test`: 269 passed
+- `npm.cmd test`: 270 passed

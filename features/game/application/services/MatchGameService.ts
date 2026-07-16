@@ -21,7 +21,26 @@ import type {
   GameDatabaseExecutor,
 } from '../../infrastructure/sqlite/types';
 import { runGameDatabaseTransaction } from '../../infrastructure/sqlite/transaction';
+import type {
+  MatchDiagnosticDart,
+  MatchDiagnosticGame,
+  MatchDiagnosticRawRow,
+  MatchDiagnosticReport,
+  MatchDiagnosticSummary,
+  MatchDiagnosticTurn,
+  MatchRepairResult,
+} from './MatchDiagnostics';
 import type { MatchGameServicePort } from './MatchGameServicePort';
+
+export type {
+  MatchDiagnosticDart,
+  MatchDiagnosticGame,
+  MatchDiagnosticRawRow,
+  MatchDiagnosticReport,
+  MatchDiagnosticSummary,
+  MatchDiagnosticTurn,
+  MatchRepairResult,
+} from './MatchDiagnostics';
 
 export class MatchActiveExistsError extends Error {
   constructor(readonly matchId: string) {
@@ -468,17 +487,23 @@ export class MatchGameService implements MatchGameServicePort {
     });
   }
 
-  async ensureRatingEvaluationCurrent(matchId: string) {
-    let result: { evaluationId: string | null; recalculationRequired: boolean } = {
-      evaluationId: null,
-      recalculationRequired: false,
-    };
+  async getMatchDiagnostics(matchId: string): Promise<MatchDiagnosticReport> {
+    return buildMatchDiagnosticReport(this.db, matchId);
+  }
+
+  async ensureRatingEvaluationCurrent(matchId: string): Promise<MatchRepairResult> {
+    const holder: { result: MatchRepairResult | null } = { result: null };
 
     await runGameDatabaseTransaction(this.db, async (transaction) => {
-      result = await ensureMatchRatingEvaluationCurrent(transaction, matchId);
+      holder.result = await ensureMatchRatingEvaluationCurrent(transaction, matchId);
     });
 
-    return result;
+    if (!holder.result) {
+      throw new Error('MATCH rating repair did not return a result.');
+    }
+    console.log('[MATCH repair before]', holder.result.before);
+    console.log('[MATCH repair after]', holder.result.after);
+    return holder.result;
   }
 }
 
@@ -2200,10 +2225,614 @@ async function insertMatchRatingEvaluation(
   await insertCommonMatchOutbox(db, owner.account_id, matchId, now);
 }
 
-async function ensureMatchRatingEvaluationCurrent(db: GameDatabaseExecutor, matchId: string) {
+const MATCH_DIAGNOSTIC_TARGET_MATCH_ID = 'f5a5b1ac-6558-4470-a07f-d686a6135af8';
+const MATCH_DIAGNOSTIC_TARGET_EXPECTED = {
+  totalDarts: 18,
+  ppdMilli: 55667,
+  threeDartAverageMilli: 167000,
+  mprMilli: 7333,
+};
+
+async function buildMatchDiagnosticReport(
+  db: GameDatabaseExecutor,
+  matchId: string,
+): Promise<MatchDiagnosticReport> {
+  const generatedAt = new Date().toISOString();
+  const match = await db.getFirstAsync<MatchDiagnosticRawRow>(
+    'SELECT * FROM matches WHERE id = ? LIMIT 1',
+    matchId,
+  );
+  const players = await db.getAllAsync<MatchDiagnosticRawRow>(
+    `SELECT mp.*, p.player_type, p.account_id
+     FROM match_players mp
+     LEFT JOIN players p ON p.id = mp.player_id
+     WHERE mp.match_id = ?
+     ORDER BY mp.slot_no ASC`,
+    matchId,
+  );
+  const games = await loadDiagnosticGames(db, matchId);
+  const gameSessions = await db.getAllAsync<MatchDiagnosticRawRow>(
+    'SELECT * FROM game_sessions WHERE match_id = ? ORDER BY match_game_no ASC',
+    matchId,
+  );
+  const gamePlayers = await db.getAllAsync<MatchDiagnosticRawRow>(
+    `SELECT gp.*, g.match_game_no, g.mode
+     FROM game_players gp
+     JOIN game_sessions g ON g.id = gp.game_id
+     WHERE g.match_id = ?
+     ORDER BY g.match_game_no ASC, gp.turn_order ASC`,
+    matchId,
+  );
+  const turns = await db.getAllAsync<MatchDiagnosticRawRow>(
+    `SELECT t.*, g.match_game_no, g.mode, gp.player_id
+     FROM turns t
+     JOIN game_sessions g ON g.id = t.game_id
+     JOIN game_players gp ON gp.id = t.game_player_id
+     WHERE g.match_id = ?
+     ORDER BY g.match_game_no ASC, t.turn_sequence_no ASC`,
+    matchId,
+  );
+  const rawDarts = await db.getAllAsync<MatchDiagnosticRawRow>(
+    `SELECT d.*, g.match_game_no, g.mode
+     FROM darts d
+     JOIN game_sessions g ON g.id = d.game_id
+     WHERE g.match_id = ?
+     ORDER BY g.match_game_no ASC, d.round_no ASC, d.turn_id ASC, d.dart_no ASC`,
+    matchId,
+  );
+  const owner = players.find(
+    (player) => player.player_type_snapshot === 'owner' || player.player_type === 'owner',
+  );
+  const ownerPlayerId = typeof owner?.player_id === 'string' ? owner.player_id : null;
+  const canonical = ownerPlayerId
+    ? await getMatchPlayerCanonicalStats(db, matchId, ownerPlayerId)
+    : null;
+  const ownerTurns = ownerPlayerId
+    ? await loadOwnerDiagnosticTurns(db, matchId, ownerPlayerId)
+    : [];
+  const darts = await loadDiagnosticDarts(db, matchId);
+  const saved = await loadDiagnosticSavedRows(db, matchId, ownerPlayerId);
+  const summary = await buildMatchDiagnosticSummary({
+    db,
+    matchId,
+    ownerPlayerId,
+    ownerTurns,
+    canonical,
+    saved,
+  });
+
+  return {
+    generatedAt,
+    match,
+    players,
+    games,
+    ownerTurns,
+    darts,
+    saved,
+    raw: {
+      gameSessions,
+      gamePlayers,
+      turns,
+      darts: rawDarts,
+    },
+    summary,
+    repairTarget: matchId === MATCH_DIAGNOSTIC_TARGET_MATCH_ID,
+    repairEligible:
+      Boolean(match) &&
+      match?.status === 'completed' &&
+      ownerPlayerId !== null &&
+      summary.mismatches.length > 0,
+    error: null,
+  };
+}
+
+async function loadDiagnosticGames(
+  db: GameDatabaseExecutor,
+  matchId: string,
+): Promise<MatchDiagnosticGame[]> {
+  const rows = await db.getAllAsync<{
+    id: string;
+    match_game_no: MatchGameNo;
+    mode: MatchGameMode;
+    status: string;
+    completion_reason: string | null;
+    winner_player_id: string | null;
+    completed_at: string | null;
+  }>(
+    `SELECT id, match_game_no, mode, status, completion_reason, winner_player_id, completed_at
+     FROM game_sessions
+     WHERE match_id = ?
+     ORDER BY match_game_no ASC`,
+    matchId,
+  );
+  return rows.map((row) => ({
+    gameId: row.id,
+    gameNo: row.match_game_no,
+    mode: row.mode,
+    status: row.status,
+    completionReason: row.completion_reason,
+    winnerPlayerId: row.winner_player_id,
+    completedAt: row.completed_at,
+  }));
+}
+
+async function loadOwnerDiagnosticTurns(
+  db: GameDatabaseExecutor,
+  matchId: string,
+  ownerPlayerId: string,
+): Promise<MatchDiagnosticTurn[]> {
+  const rows = await db.getAllAsync<{
+    game_id: string;
+    game_no: MatchGameNo;
+    mode: MatchGameMode;
+    completion_reason: string | null;
+    turn_id: string;
+    round_no: number;
+    turn_sequence_no: number;
+    status: MatchTurn['status'] | 'voided' | 'invalid';
+    applied_score: number;
+    raw_score: number;
+    start_remaining_score: number | null;
+    end_remaining_score: number | null;
+    is_checkout: number;
+    is_bust: number;
+    persisted_dart_count: number;
+    active_dart_count: number;
+    voided_dart_count: number;
+    invalid_dart_count: number;
+  }>(
+    `SELECT g.id AS game_id, g.match_game_no AS game_no, g.mode, g.completion_reason,
+            t.id AS turn_id, t.round_no, t.turn_sequence_no, t.status,
+            t.applied_score, t.raw_score, t.start_remaining_score, t.end_remaining_score,
+            t.is_checkout, t.is_bust, t.dart_count AS persisted_dart_count,
+            SUM(CASE WHEN d.status = 'active' THEN 1 ELSE 0 END) AS active_dart_count,
+            SUM(CASE WHEN d.status = 'voided' THEN 1 ELSE 0 END) AS voided_dart_count,
+            SUM(CASE WHEN d.status = 'invalidated' THEN 1 ELSE 0 END) AS invalid_dart_count
+     FROM turns t
+     JOIN game_sessions g ON g.id = t.game_id
+     JOIN game_players gp ON gp.id = t.game_player_id
+     LEFT JOIN darts d ON d.turn_id = t.id
+     WHERE g.match_id = ? AND gp.player_id = ?
+     GROUP BY t.id
+     ORDER BY g.match_game_no ASC, t.turn_sequence_no ASC`,
+    matchId,
+    ownerPlayerId,
+  );
+
+  return rows.map((row) => {
+    const invalidPersistedDartCount = row.persisted_dart_count < 0 || row.persisted_dart_count > 3;
+    const validPersistedDartCount = invalidPersistedDartCount ? 0 : row.persisted_dart_count;
+    const countableTurn = !['in_progress', 'voided', 'invalid'].includes(row.status);
+    const canonicalTotalDarts = countableTurn
+      ? Math.max(validPersistedDartCount, row.active_dart_count)
+      : 0;
+    const resolvedRatingTurnKind = resolveRatingTurnKind(
+      {
+        status: row.status,
+        is_bust: row.is_bust,
+        is_checkout: row.is_checkout,
+        end_remaining_score: row.end_remaining_score,
+      },
+      { mode: row.mode, completion_reason: row.completion_reason },
+    );
+    const canonicalRatingDarts =
+      row.mode === 'zero_one' && resolvedRatingTurnKind !== 'ignored'
+        ? resolvedRatingTurnKind === 'normal'
+          ? 3
+          : canonicalTotalDarts
+        : canonicalTotalDarts;
+    const canonicalEffectiveScore =
+      resolvedRatingTurnKind === 'ignored' || resolvedRatingTurnKind === 'bust'
+        ? 0
+        : row.applied_score;
+
+    return {
+      gameNo: row.game_no,
+      mode: row.mode,
+      turnId: row.turn_id,
+      roundNo: row.round_no,
+      turnSequenceNo: row.turn_sequence_no,
+      status: row.status,
+      appliedScore: row.applied_score,
+      rawScore: row.raw_score,
+      startRemainingScore: row.start_remaining_score,
+      endRemainingScore: row.end_remaining_score,
+      isCheckout: row.is_checkout === 1,
+      isBust: row.is_bust === 1,
+      persistedDartCount: row.persisted_dart_count,
+      activeDartCount: row.active_dart_count,
+      voidedDartCount: row.voided_dart_count,
+      invalidDartCount: row.invalid_dart_count,
+      resolvedRatingTurnKind,
+      canonicalRatingDarts,
+      canonicalTotalDarts,
+      canonicalEffectiveScore,
+    };
+  });
+}
+
+async function loadDiagnosticDarts(
+  db: GameDatabaseExecutor,
+  matchId: string,
+): Promise<MatchDiagnosticDart[]> {
+  const rows = await db.getAllAsync<{
+    turn_id: string;
+    dart_no: number;
+    area: string;
+    segment_number: number | null;
+    multiplier: number;
+    score: number;
+    cricket_marks: number;
+    status: string;
+    client_action_id: string | null;
+  }>(
+    `SELECT d.turn_id, d.dart_no, d.area, d.segment_number, d.multiplier,
+            d.score, d.cricket_marks, d.status, d.client_action_id
+     FROM darts d
+     JOIN game_sessions g ON g.id = d.game_id
+     WHERE g.match_id = ?
+     ORDER BY g.match_game_no ASC, d.round_no ASC, d.turn_id ASC, d.dart_no ASC`,
+    matchId,
+  );
+  return rows.map((row) => ({
+    turnId: row.turn_id,
+    dartNo: row.dart_no,
+    area: row.area,
+    segment: row.segment_number,
+    multiplier: row.multiplier,
+    score: row.score,
+    cricketMarks: row.cricket_marks,
+    status: row.status,
+    clientActionId: row.client_action_id,
+  }));
+}
+
+async function loadDiagnosticSavedRows(
+  db: GameDatabaseExecutor,
+  matchId: string,
+  ownerPlayerId: string | null,
+) {
+  const gamePlayerResults = await db.getAllAsync<MatchDiagnosticRawRow>(
+    `SELECT r.*, g.match_game_no, g.mode
+     FROM game_player_results r
+     JOIN game_sessions g ON g.id = r.game_id
+     WHERE g.match_id = ?
+     ORDER BY g.match_game_no ASC, r.player_id ASC`,
+    matchId,
+  );
+  const matchPlayerResults = await db.getAllAsync<MatchDiagnosticRawRow>(
+    'SELECT * FROM match_player_results WHERE match_id = ? ORDER BY player_id ASC',
+    matchId,
+  );
+  const ratingEvaluations = await db.getAllAsync<MatchDiagnosticRawRow>(
+    `SELECT * FROM rating_evaluations
+     WHERE source_match_id = ?
+     ORDER BY source_revision ASC, created_at ASC`,
+    matchId,
+  );
+  const ratingEvaluationGames = await db.getAllAsync<MatchDiagnosticRawRow>(
+    `SELECT rg.*
+     FROM rating_evaluation_games rg
+     JOIN rating_evaluations re ON re.id = rg.evaluation_id
+     WHERE re.source_match_id = ?
+     ORDER BY re.source_revision ASC, rg.game_no ASC, rg.game_id ASC`,
+    matchId,
+  );
+  const ratingSnapshots = await db.getAllAsync<MatchDiagnosticRawRow>(
+    `SELECT s.*
+     FROM rating_snapshots s
+     JOIN rating_evaluations re ON re.id = s.evaluation_id
+     WHERE re.source_match_id = ?
+     ORDER BY s.created_at ASC`,
+    matchId,
+  );
+  const ratingProfiles = ownerPlayerId
+    ? await db.getAllAsync<MatchDiagnosticRawRow>(
+        'SELECT * FROM rating_profiles WHERE owner_player_id = ? ORDER BY updated_at DESC',
+        ownerPlayerId,
+      )
+    : [];
+
+  return {
+    gamePlayerResults,
+    matchPlayerResults,
+    ratingEvaluations,
+    ratingEvaluationGames,
+    ratingSnapshots,
+    ratingProfiles,
+  };
+}
+
+async function buildMatchDiagnosticSummary({
+  db,
+  matchId,
+  ownerPlayerId,
+  ownerTurns,
+  canonical,
+  saved,
+}: {
+  db: GameDatabaseExecutor;
+  matchId: string;
+  ownerPlayerId: string | null;
+  ownerTurns: MatchDiagnosticTurn[];
+  canonical: Awaited<ReturnType<typeof getMatchPlayerCanonicalStats>> | null;
+  saved: Awaited<ReturnType<typeof loadDiagnosticSavedRows>>;
+}): Promise<MatchDiagnosticSummary> {
+  const ownerGamePlayerIds = ownerPlayerId
+    ? (
+        await db.getAllAsync<{ id: string }>(
+          `SELECT gp.id
+           FROM game_players gp
+           JOIN game_sessions g ON g.id = gp.game_id
+           WHERE g.match_id = ? AND gp.player_id = ?
+           ORDER BY g.match_game_no ASC`,
+          matchId,
+          ownerPlayerId,
+        )
+      ).map((row) => row.id)
+    : [];
+  const zeroOneRawEffectiveScore = canonical
+    ? canonical.games
+        .filter((game) => game.mode === 'zero_one')
+        .reduce((sum, game) => sum + game.zeroOneRatingEffectiveScore, 0)
+    : 0;
+  const zeroOneCanonicalRatingDarts = canonical
+    ? canonical.games
+        .filter((game) => game.mode === 'zero_one')
+        .reduce((sum, game) => sum + game.zeroOneRatingDarts, 0)
+    : 0;
+  const cricketMarks = canonical
+    ? canonical.games
+        .filter((game) => game.mode === 'cricket')
+        .reduce((sum, game) => sum + game.marks, 0)
+    : 0;
+  const cricketTurns = canonical
+    ? canonical.games
+        .filter((game) => game.mode === 'cricket')
+        .reduce((sum, game) => sum + game.turns, 0)
+    : 0;
+  const matchPlayerRow = ownerPlayerId
+    ? await getMatchPlayerResult(db, matchId, ownerPlayerId)
+    : null;
+  const latestEvaluation = getLatestDiagnosticRow(saved.ratingEvaluations);
+  const latestSnapshot = getLatestDiagnosticRow(
+    saved.ratingSnapshots.filter((row) => row.invalidated_at === null),
+  );
+  const latestProfile = getLatestDiagnosticRow(saved.ratingProfiles);
+  const mismatches = canonical
+    ? await collectMatchDiagnosticMismatches(db, matchId, ownerPlayerId, canonical, saved)
+    : ['owner_player'];
+  const expectedMismatches = collectExpectedMismatches(matchId, {
+    totalDarts: canonical?.aggregate.totalDarts ?? null,
+    ppdMilli: canonical?.aggregate.zeroOnePpdMilli ?? null,
+    threeDartAverageMilli: canonical?.aggregate.zeroOneThreeDartAverageMilli ?? null,
+    mprMilli: canonical?.aggregate.cricketMprMilli ?? null,
+  });
+
+  return {
+    matchId,
+    ownerPlayerId,
+    ownerGamePlayerIds,
+    zeroOneRawEffectiveScore,
+    zeroOneCanonicalRatingDarts,
+    zeroOneCalculatedPpd:
+      zeroOneCanonicalRatingDarts > 0
+        ? zeroOneRawEffectiveScore / zeroOneCanonicalRatingDarts
+        : null,
+    zeroOneCalculatedThreeDartAverage:
+      zeroOneCanonicalRatingDarts > 0
+        ? (zeroOneRawEffectiveScore * 3) / zeroOneCanonicalRatingDarts
+        : null,
+    zeroOnePpdMilli: canonical?.aggregate.zeroOnePpdMilli ?? null,
+    zeroOneThreeDartAverageMilli: canonical?.aggregate.zeroOneThreeDartAverageMilli ?? null,
+    cricketMarks,
+    cricketTurns,
+    cricketMpr: cricketTurns > 0 ? cricketMarks / cricketTurns : null,
+    cricketMprMilli: canonical?.aggregate.cricketMprMilli ?? null,
+    ownerCanonicalTotalDarts: canonical?.aggregate.totalDarts ?? 0,
+    savedPpdMilli: matchPlayerRow?.zero_one_ppd_milli ?? null,
+    savedThreeDartAverageMilli: matchPlayerRow?.zero_one_three_dart_average_milli ?? null,
+    savedMprMilli: matchPlayerRow?.cricket_mpr_milli ?? null,
+    savedTotalDarts: matchPlayerRow?.total_darts ?? null,
+    latestEvaluationId: typeof latestEvaluation?.id === 'string' ? latestEvaluation.id : null,
+    latestSourceRevision:
+      typeof latestEvaluation?.source_revision === 'number'
+        ? latestEvaluation.source_revision
+        : null,
+    latestEvaluationStatus:
+      typeof latestEvaluation?.status === 'string' ? latestEvaluation.status : null,
+    latestSnapshotId: typeof latestSnapshot?.id === 'string' ? latestSnapshot.id : null,
+    latestProfileSnapshotId: null,
+    mismatches,
+    expectedMismatches,
+    causeFindings: collectDiagnosticCauseFindings({
+      ownerPlayerId,
+      ownerTurns,
+      canonicalTotalDarts: canonical?.aggregate.totalDarts ?? 0,
+      savedTotalDarts: matchPlayerRow?.total_darts ?? null,
+      latestEvaluation,
+      latestSnapshot,
+      latestProfile,
+    }),
+  };
+}
+
+async function collectMatchDiagnosticMismatches(
+  db: GameDatabaseExecutor,
+  matchId: string,
+  ownerPlayerId: string | null,
+  canonical: Awaited<ReturnType<typeof getMatchPlayerCanonicalStats>>,
+  saved: Awaited<ReturnType<typeof loadDiagnosticSavedRows>>,
+) {
+  if (!ownerPlayerId) return ['owner_player'];
+  const mismatches = new Set<string>();
+  for (const game of canonical.games) {
+    if (
+      !gamePlayerResultMatchesCanonical(
+        await getGamePlayerResult(db, game.gameId, ownerPlayerId),
+        game,
+      )
+    ) {
+      mismatches.add('game_player_results');
+    }
+  }
+  if (
+    !matchPlayerResultMatchesCanonical(
+      await getMatchPlayerResult(db, matchId, ownerPlayerId),
+      canonical.aggregate,
+    )
+  ) {
+    mismatches.add('match_player_results');
+  }
+  const latestEvaluation = getLatestDiagnosticRow(saved.ratingEvaluations);
+  if (!latestEvaluation || latestEvaluation.status === 'invalidated') {
+    mismatches.add('rating_evaluations');
+  } else {
+    if (
+      latestEvaluation.zero_one_game_count !== canonical.aggregate.zeroOneGameCount ||
+      latestEvaluation.zero_one_ppd_milli !== canonical.aggregate.zeroOnePpdMilli ||
+      latestEvaluation.cricket_game_count !== canonical.aggregate.cricketGameCount ||
+      latestEvaluation.cricket_mpr_milli !== canonical.aggregate.cricketMprMilli ||
+      latestEvaluation.total_darts !== canonical.aggregate.totalDarts
+    ) {
+      mismatches.add('rating_evaluations');
+    }
+    const evaluationGames = await getRatingEvaluationGames(db, String(latestEvaluation.id));
+    if (!ratingEvaluationGamesMatchCanonical(evaluationGames, canonical.games)) {
+      mismatches.add('rating_evaluation_games');
+    }
+  }
+  const latestSnapshot = getLatestDiagnosticRow(
+    saved.ratingSnapshots.filter((row) => row.invalidated_at === null),
+  );
+  if (latestSnapshot && latestEvaluation && latestSnapshot.evaluation_id !== latestEvaluation.id) {
+    mismatches.add('Snapshot');
+  }
+  const latestProfile = getLatestDiagnosticRow(saved.ratingProfiles);
+  if (
+    latestSnapshot &&
+    latestProfile &&
+    !ratingProfileMatchesSnapshot(latestProfile, latestSnapshot)
+  ) {
+    mismatches.add('Profile');
+  }
+  return Array.from(mismatches);
+}
+
+function ratingProfileMatchesSnapshot(
+  profile: MatchDiagnosticRawRow,
+  snapshot: MatchDiagnosticRawRow,
+) {
+  return (
+    profile.measurement_status === snapshot.measurement_status &&
+    profile.rating_tenths === snapshot.rating_tenths &&
+    profile.precise_rating_milli === snapshot.precise_rating_milli &&
+    profile.confidence_bp === snapshot.confidence_bp &&
+    profile.eligible_match_count === snapshot.evaluated_match_count &&
+    profile.eligible_standalone_zero_one_count === snapshot.evaluated_standalone_zero_one_count &&
+    profile.eligible_standalone_cricket_count === snapshot.evaluated_standalone_cricket_count &&
+    profile.zero_one_index_milli === snapshot.zero_one_index_milli &&
+    profile.cricket_index_milli === snapshot.cricket_index_milli &&
+    profile.match_index_milli === snapshot.match_index_milli
+  );
+}
+
+function collectExpectedMismatches(
+  matchId: string,
+  values: {
+    totalDarts: number | null;
+    ppdMilli: number | null;
+    threeDartAverageMilli: number | null;
+    mprMilli: number | null;
+  },
+) {
+  if (matchId !== MATCH_DIAGNOSTIC_TARGET_MATCH_ID) return [];
+  const mismatches: string[] = [];
+  if (values.totalDarts !== MATCH_DIAGNOSTIC_TARGET_EXPECTED.totalDarts) {
+    mismatches.push('OWNER totalDarts');
+  }
+  if (values.ppdMilli !== MATCH_DIAGNOSTIC_TARGET_EXPECTED.ppdMilli) {
+    mismatches.push('PPD milli');
+  }
+  if (values.threeDartAverageMilli !== MATCH_DIAGNOSTIC_TARGET_EXPECTED.threeDartAverageMilli) {
+    mismatches.push('3DA milli');
+  }
+  if (values.mprMilli !== MATCH_DIAGNOSTIC_TARGET_EXPECTED.mprMilli) {
+    mismatches.push('MPR milli');
+  }
+  return mismatches;
+}
+
+function collectDiagnosticCauseFindings({
+  ownerPlayerId,
+  ownerTurns,
+  canonicalTotalDarts,
+  savedTotalDarts,
+  latestEvaluation,
+  latestSnapshot,
+  latestProfile,
+}: {
+  ownerPlayerId: string | null;
+  ownerTurns: MatchDiagnosticTurn[];
+  canonicalTotalDarts: number;
+  savedTotalDarts: number | null;
+  latestEvaluation: MatchDiagnosticRawRow | null;
+  latestSnapshot: MatchDiagnosticRawRow | null;
+  latestProfile: MatchDiagnosticRawRow | null;
+}) {
+  const findings: string[] = [];
+  if (!ownerPlayerId) findings.push('OWNER Playerを特定できません。');
+  const persistedTotal = ownerTurns.reduce((sum, turn) => sum + turn.persistedDartCount, 0);
+  const activeTotal = ownerTurns.reduce((sum, turn) => sum + turn.activeDartCount, 0);
+  findings.push(`turns.dart_count合計=${persistedTotal}`);
+  findings.push(`active DART行数合計=${activeTotal}`);
+  findings.push(`canonical total darts=${canonicalTotalDarts}`);
+  if (savedTotalDarts !== null) findings.push(`保存済みtotalDarts=${savedTotalDarts}`);
+  const gameEndTurns = ownerTurns.filter((turn) => turn.status === 'game_end');
+  findings.push(`OWNER game_end TURN数=${gameEndTurns.length}`);
+  for (const turn of gameEndTurns) {
+    findings.push(
+      `game_end ${turn.turnId}: kind=${turn.resolvedRatingTurnKind}, persisted=${turn.persistedDartCount}, active=${turn.activeDartCount}, canonical=${turn.canonicalTotalDarts}, endRemaining=${turn.endRemainingScore}`,
+    );
+  }
+  if (latestEvaluation) {
+    findings.push(
+      `最新Evaluation revision=${latestEvaluation.source_revision}, status=${latestEvaluation.status}, totalDarts=${latestEvaluation.total_darts}`,
+    );
+  }
+  if (latestSnapshot) {
+    findings.push(`最新Snapshot=${latestSnapshot.id}, evaluation=${latestSnapshot.evaluation_id}`);
+  }
+  if (latestProfile) {
+    findings.push(
+      `Profile rating=${latestProfile.rating_tenths}, confidence=${latestProfile.confidence_bp}, eligibleMatch=${latestProfile.eligible_match_count}`,
+    );
+  }
+  return findings;
+}
+
+function getLatestDiagnosticRow(rows: MatchDiagnosticRawRow[]) {
+  return rows.length > 0 ? rows[rows.length - 1] : null;
+}
+
+async function ensureMatchRatingEvaluationCurrent(
+  db: GameDatabaseExecutor,
+  matchId: string,
+): Promise<MatchRepairResult> {
+  const beforeReport = await buildMatchDiagnosticReport(db, matchId);
   const match = await loadMatchRow(db, matchId);
   if (match.status !== 'completed' || !match.winner_player_id || !match.loser_player_id) {
-    return { evaluationId: null, recalculationRequired: false };
+    const afterReport = await buildMatchDiagnosticReport(db, matchId);
+    return {
+      repaired: false,
+      evaluationId: null,
+      recalculationRequired: false,
+      before: beforeReport.summary,
+      after: afterReport.summary,
+      mismatchesBefore: beforeReport.summary.mismatches,
+      mismatchesAfter: afterReport.summary.mismatches,
+      error: null,
+    };
   }
 
   const owner = await db.getFirstAsync<{ id: string; account_id: string }>(
@@ -2214,7 +2843,17 @@ async function ensureMatchRatingEvaluationCurrent(db: GameDatabaseExecutor, matc
     match.loser_player_id,
   );
   if (!owner) {
-    return { evaluationId: null, recalculationRequired: false };
+    const afterReport = await buildMatchDiagnosticReport(db, matchId);
+    return {
+      repaired: false,
+      evaluationId: null,
+      recalculationRequired: false,
+      before: beforeReport.summary,
+      after: afterReport.summary,
+      mismatchesBefore: beforeReport.summary.mismatches,
+      mismatchesAfter: afterReport.summary.mismatches,
+      error: null,
+    };
   }
 
   const canonical = await getMatchPlayerCanonicalStats(db, matchId, owner.id);
@@ -2264,7 +2903,17 @@ async function ensureMatchRatingEvaluationCurrent(db: GameDatabaseExecutor, matc
     owner.id,
   );
   if (!latest) {
-    return { evaluationId: null, recalculationRequired: false };
+    const afterReport = await buildMatchDiagnosticReport(db, matchId);
+    return {
+      repaired: false,
+      evaluationId: null,
+      recalculationRequired: false,
+      before: beforeReport.summary,
+      after: afterReport.summary,
+      mismatchesBefore: beforeReport.summary.mismatches,
+      mismatchesAfter: afterReport.summary.mismatches,
+      error: null,
+    };
   }
 
   const evaluationMatchesCanonical =
@@ -2280,10 +2929,30 @@ async function ensureMatchRatingEvaluationCurrent(db: GameDatabaseExecutor, matc
   );
   const rowsWereAlreadyCurrent = gameRowsCurrent && matchRowCurrent;
   if (rowsWereAlreadyCurrent && evaluationMatchesCanonical && evaluationGamesMatch) {
-    return { evaluationId: latest.id, recalculationRequired: false };
+    const afterReport = await buildMatchDiagnosticReport(db, matchId);
+    return {
+      repaired: false,
+      evaluationId: latest.id,
+      recalculationRequired: false,
+      before: beforeReport.summary,
+      after: afterReport.summary,
+      mismatchesBefore: beforeReport.summary.mismatches,
+      mismatchesAfter: afterReport.summary.mismatches,
+      error: null,
+    };
   }
   if (evaluationMatchesCanonical && evaluationGamesMatch) {
-    return { evaluationId: latest.id, recalculationRequired: false };
+    const afterReport = await buildMatchDiagnosticReport(db, matchId);
+    return {
+      repaired: true,
+      evaluationId: latest.id,
+      recalculationRequired: false,
+      before: beforeReport.summary,
+      after: afterReport.summary,
+      mismatchesBefore: beforeReport.summary.mismatches,
+      mismatchesAfter: afterReport.summary.mismatches,
+      error: null,
+    };
   }
 
   const evaluationId = createGameId();
@@ -2354,7 +3023,17 @@ async function ensureMatchRatingEvaluationCurrent(db: GameDatabaseExecutor, matc
     now,
   );
 
-  return { evaluationId, recalculationRequired: true };
+  const afterReport = await buildMatchDiagnosticReport(db, matchId);
+  return {
+    repaired: true,
+    evaluationId,
+    recalculationRequired: true,
+    before: beforeReport.summary,
+    after: afterReport.summary,
+    mismatchesBefore: beforeReport.summary.mismatches,
+    mismatchesAfter: afterReport.summary.mismatches,
+    error: null,
+  };
 }
 
 async function insertCommonMatchOutbox(

@@ -27,6 +27,11 @@ export {
   MatchManualWinnerRequiredError,
 } from './MatchGameService';
 export type { MatchGameServicePort, MatchLastSettings } from './MatchGameServicePort';
+export type {
+  MatchDiagnosticReport,
+  MatchDiagnosticSummary,
+  MatchRepairResult,
+} from './MatchDiagnostics';
 export { clearMatchRedoSession, MatchRedoSession } from './MatchRedoSession';
 export { createMatchLeaveChoices } from './matchLeaveActions';
 export type { MatchLeaveChoice, MatchLeaveChoiceId } from './matchLeaveActions';

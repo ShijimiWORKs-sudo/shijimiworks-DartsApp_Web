@@ -90,3 +90,29 @@ test('game result screens use source Rating results instead of only profile stat
     /COUNT-UPはRating計算には使用されません/,
   );
 });
+
+test('MATCH rating diagnostics route reads live database rows and exposes explicit repair', () => {
+  const routePath = 'app/dev/match-diagnostics/[matchId].tsx';
+  assert.equal(existsSync(path.join(rootDir, routePath)), true);
+
+  const source = readText(routePath);
+  assert.match(source, /getMatchDiagnostics/);
+  assert.match(source, /診断JSONをコピー/);
+  assert.match(source, /navigator/);
+  assert.match(source, /このMATCHを修復する/);
+  assert.match(source, /ensureRatingEvaluationCurrent/);
+  assert.match(source, /recalculateFromEvaluation/);
+  assert.match(source, /OWNERの全TURN/);
+  assert.match(source, /全DART行/);
+  assert.match(source, /rating_evaluations全revision/);
+  assert.match(source, /rating_snapshots/);
+
+  const service = readText('features/game/application/services/MatchGameService.ts');
+  assert.match(service, /buildMatchDiagnosticReport/);
+  assert.match(service, /loadOwnerDiagnosticTurns/);
+  assert.match(service, /resolvedRatingTurnKind/);
+  assert.match(service, /canonicalRatingDarts/);
+  assert.match(service, /\[MATCH repair before\]/);
+  assert.match(service, /\[MATCH repair after\]/);
+  assert.match(service, /MATCH_DIAGNOSTIC_TARGET_MATCH_ID/);
+});

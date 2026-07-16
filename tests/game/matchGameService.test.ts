@@ -687,9 +687,57 @@ test('MATCH rating repair rebuilds legacy 60 PPD summaries from raw checkout tur
       originalEvaluation.id,
     );
 
+    const diagnosticBefore = await service.getMatchDiagnostics(match.matchId);
+    assert.equal(diagnosticBefore.summary.savedPpdMilli, 60000);
+    assert.equal(diagnosticBefore.summary.savedThreeDartAverageMilli, 180000);
+    assert.equal(diagnosticBefore.summary.savedTotalDarts, 16);
+    assert.equal(diagnosticBefore.summary.zeroOneRawEffectiveScore, 501);
+    assert.equal(diagnosticBefore.summary.zeroOneCanonicalRatingDarts, 9);
+    assert.equal(diagnosticBefore.summary.zeroOnePpdMilli, 55667);
+    assert.equal(diagnosticBefore.summary.zeroOneThreeDartAverageMilli, 167000);
+    assert.equal(diagnosticBefore.summary.ownerCanonicalTotalDarts, 18);
+    assert.equal(diagnosticBefore.summary.cricketMprMilli, 7333);
+    assert.equal(
+      diagnosticBefore.ownerTurns.some((turn) => turn.status === 'game_end'),
+      true,
+    );
+    assert.equal(
+      diagnosticBefore.ownerTurns.some(
+        (turn) =>
+          turn.status === 'game_end' &&
+          turn.resolvedRatingTurnKind === 'checkout' &&
+          turn.persistedDartCount === 3 &&
+          turn.activeDartCount === 2 &&
+          turn.canonicalRatingDarts === 3,
+      ),
+      true,
+    );
+    assert.equal(
+      diagnosticBefore.darts.some(
+        (dart) =>
+          dart.clientActionId === 'repair-checkout-final-d12' && dart.status === 'invalidated',
+      ),
+      true,
+    );
+    assert.deepEqual(
+      [
+        'game_player_results',
+        'match_player_results',
+        'rating_evaluations',
+        'rating_evaluation_games',
+      ].every((name) => diagnosticBefore.summary.mismatches.includes(name)),
+      true,
+    );
+
     const repair = await service.ensureRatingEvaluationCurrent(match.matchId);
     assert.equal(repair.recalculationRequired, true);
     assert.ok(repair.evaluationId);
+    assert.equal(repair.before.savedPpdMilli, 60000);
+    assert.equal(repair.before.ownerCanonicalTotalDarts, 18);
+    assert.equal(repair.after.savedPpdMilli, 55667);
+    assert.equal(repair.after.savedThreeDartAverageMilli, 167000);
+    assert.equal(repair.after.savedTotalDarts, 18);
+    assert.equal(repair.after.latestSourceRevision, 2);
 
     const latest = await db.getFirstAsync<{
       source_revision: number;
@@ -805,9 +853,19 @@ test('MATCH rating repair rebuilds legacy 60 PPD summaries from raw checkout tur
     );
     assert.equal(profile?.rating_tenths, validSnapshot?.rating_tenths);
 
+    const diagnosticAfter = await service.getMatchDiagnostics(match.matchId);
+    assert.equal(diagnosticAfter.summary.savedPpdMilli, 55667);
+    assert.equal(diagnosticAfter.summary.savedThreeDartAverageMilli, 167000);
+    assert.equal(diagnosticAfter.summary.savedTotalDarts, 18);
+    assert.equal(diagnosticAfter.summary.latestSourceRevision, 2);
+    assert.equal(diagnosticAfter.summary.mismatches.length, 0);
+    assert.equal(diagnosticAfter.summary.expectedMismatches.length, 0);
+
     const secondRepair = await service.ensureRatingEvaluationCurrent(match.matchId);
     assert.equal(secondRepair.recalculationRequired, false);
     assert.equal(secondRepair.evaluationId, repair.evaluationId);
+    assert.equal(secondRepair.repaired, false);
+    assert.equal(secondRepair.mismatchesAfter.length, 0);
     const revisionCount = await db.getFirstAsync<{ count: number }>(
       `SELECT COUNT(*) AS count FROM rating_evaluations WHERE source_match_id = ?`,
       match.matchId,
