@@ -463,6 +463,37 @@ test('MATCH rating repair rebuilds legacy 60 PPD summaries from raw checkout tur
     );
     assert.ok(checkoutD12?.id);
     assert.equal(checkoutD12?.status, 'active');
+    await db.runAsync(
+      `UPDATE turns
+       SET status = 'game_end',
+           is_checkout = 1,
+           end_remaining_score = 0
+       WHERE game_id = ? AND is_checkout = 1`,
+      match.games[0]?.gameId,
+    );
+    const checkoutTurnAsGameEnd = await db.getFirstAsync<{
+      status: string;
+      applied_score: number;
+      end_remaining_score: number | null;
+      is_checkout: number;
+      dart_count: number;
+      active_darts: number;
+    }>(
+      `SELECT t.status, t.applied_score, t.end_remaining_score, t.is_checkout, t.dart_count,
+              COUNT(d.id) AS active_darts
+       FROM turns t
+       LEFT JOIN darts d ON d.turn_id = t.id AND d.status = 'active'
+       WHERE t.game_id = ? AND t.turn_sequence_no = 5
+       GROUP BY t.id
+       LIMIT 1`,
+      match.games[0]?.gameId,
+    );
+    assert.equal(checkoutTurnAsGameEnd?.status, 'game_end');
+    assert.equal(checkoutTurnAsGameEnd?.applied_score, 141);
+    assert.equal(checkoutTurnAsGameEnd?.end_remaining_score, 0);
+    assert.equal(checkoutTurnAsGameEnd?.is_checkout, 1);
+    assert.equal(checkoutTurnAsGameEnd?.dart_count, 3);
+    assert.equal(checkoutTurnAsGameEnd?.active_darts, 3);
 
     match = await service.startNextGame(match.matchId);
 

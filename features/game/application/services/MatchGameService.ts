@@ -1479,11 +1479,15 @@ async function insertGamePlayerResults(
 }
 
 async function getPlayerGameStats(db: GameDatabaseExecutor, gameId: string, gamePlayerId: string) {
-  const game = await db.getFirstAsync<{ mode: MatchGameMode }>(
-    'SELECT mode FROM game_sessions WHERE id = ?',
-    gameId,
-  );
+  const game = await db.getFirstAsync<{
+    mode: MatchGameMode;
+    completion_reason: string | null;
+  }>('SELECT mode, completion_reason FROM game_sessions WHERE id = ?', gameId);
   const turnDartCounts = await getCanonicalTurnDartCounts(db, gameId, gamePlayerId);
+  const resolvedTurns = turnDartCounts.map((turn) => ({
+    ...turn,
+    ratingTurnKind: resolveRatingTurnKind(turn, game),
+  }));
   const canonicalDarts = turnDartCounts.reduce((sum, row) => sum + row.canonicalDarts, 0);
   const legacyDartCountFallbacks = turnDartCounts
     .filter((row) => row.legacyFallbackUsed || row.invalidPersistedDartCount)
@@ -1504,23 +1508,12 @@ async function getPlayerGameStats(db: GameDatabaseExecutor, gameId: string, game
       turns: legacyDartCountFallbacks,
     });
   }
-  const turnRow = await db.getFirstAsync<{
-    effectiveScore: number;
-    rounds: number;
-    turns: number;
-    bust: number;
-    checkout: number;
-  }>(
-    `SELECT COALESCE(SUM(applied_score), 0) AS effectiveScore,
-            COALESCE(MAX(round_no), 0) AS rounds,
-            COUNT(CASE WHEN status <> 'in_progress' THEN id END) AS turns,
-            COUNT(CASE WHEN is_bust = 1 THEN id END) AS bust,
-            COUNT(CASE WHEN is_checkout = 1 THEN id END) AS checkout
-     FROM turns
-     WHERE game_id = ? AND game_player_id = ?`,
-    gameId,
-    gamePlayerId,
-  );
+  const countedTurns = resolvedTurns.filter((turn) => turn.ratingTurnKind !== 'ignored');
+  const effectiveScore = countedTurns.reduce((sum, turn) => sum + turn.applied_score, 0);
+  const rounds = countedTurns.reduce((max, turn) => Math.max(max, turn.round_no), 0);
+  const turns = countedTurns.length;
+  const bust = resolvedTurns.filter((turn) => turn.ratingTurnKind === 'bust').length;
+  const checkout = resolvedTurns.some((turn) => turn.ratingTurnKind === 'checkout') ? 1 : 0;
   const row = await db.getFirstAsync<{
     totalScore: number;
     darts: number;
@@ -1543,7 +1536,8 @@ async function getPlayerGameStats(db: GameDatabaseExecutor, gameId: string, game
             COALESCE(SUM(d.cricket_marks), 0) AS marks
      FROM turns t
      LEFT JOIN darts d ON d.turn_id = t.id AND d.status = 'active'
-     WHERE t.game_id = ? AND t.game_player_id = ?`,
+     WHERE t.game_id = ? AND t.game_player_id = ?
+       AND t.status NOT IN ('voided', 'invalid')`,
     gameId,
     gamePlayerId,
   );
@@ -1558,9 +1552,9 @@ async function getPlayerGameStats(db: GameDatabaseExecutor, gameId: string, game
   );
   return {
     totalScore: row?.totalScore ?? 0,
-    effectiveScore: turnRow?.effectiveScore ?? 0,
-    rounds: turnRow?.rounds ?? 0,
-    turns: turnRow?.turns ?? 0,
+    effectiveScore,
+    rounds,
+    turns,
     darts: canonicalDarts,
     bull: row?.bull ?? 0,
     innerBull: row?.innerBull ?? 0,
@@ -1568,8 +1562,8 @@ async function getPlayerGameStats(db: GameDatabaseExecutor, gameId: string, game
     triple: row?.triple ?? 0,
     double: row?.double ?? 0,
     miss: row?.miss ?? 0,
-    bust: turnRow?.bust ?? 0,
-    checkout: (turnRow?.checkout ?? 0) > 0 ? 1 : 0,
+    bust,
+    checkout,
     marks: row?.marks ?? 0,
     closed: closed?.count ?? 0,
     zeroOneRatingEffectiveScore: zeroOneRating.effectiveScore,
@@ -1586,17 +1580,19 @@ async function getPlayerGameStats(db: GameDatabaseExecutor, gameId: string, game
         ? calculateThreeDartAverageMilli(zeroOneRating.effectiveScore, zeroOneRating.ratingDarts)
         : null,
     mprMilli:
-      game?.mode === 'cricket' && turnRow && turnRow.turns > 0
-        ? Math.round(((row?.marks ?? 0) * 1000) / turnRow.turns)
-        : null,
+      game?.mode === 'cricket' && turns > 0 ? Math.round(((row?.marks ?? 0) * 1000) / turns) : null,
   };
 }
+
+type RatingTurnKind = 'normal' | 'bust' | 'checkout' | 'ignored';
 
 type CanonicalTurnDartCount = {
   id: string;
   round_no: number;
   turn_sequence_no: number;
   status: MatchTurn['status'] | 'voided' | 'invalid';
+  start_remaining_score: number | null;
+  end_remaining_score: number | null;
   applied_score: number;
   is_bust: number;
   is_checkout: number;
@@ -1618,8 +1614,9 @@ async function getCanonicalTurnDartCounts(
       'canonicalDarts' | 'invalidPersistedDartCount' | 'legacyFallbackUsed'
     >
   >(
-    `SELECT t.id, t.round_no, t.turn_sequence_no, t.status, t.applied_score, t.is_bust,
-            t.is_checkout, t.dart_count AS persisted_dart_count, COUNT(d.id) AS active_darts
+    `SELECT t.id, t.round_no, t.turn_sequence_no, t.status, t.start_remaining_score,
+            t.end_remaining_score, t.applied_score, t.is_bust, t.is_checkout,
+            t.dart_count AS persisted_dart_count, COUNT(d.id) AS active_darts
      FROM turns t
      LEFT JOIN darts d ON d.turn_id = t.id AND d.status = 'active'
      WHERE t.game_id = ? AND t.game_player_id = ?
@@ -1643,27 +1640,59 @@ async function getCanonicalTurnDartCounts(
   });
 }
 
+function resolveRatingTurnKind(
+  turn: Pick<CanonicalTurnDartCount, 'status' | 'is_bust' | 'is_checkout' | 'end_remaining_score'>,
+  game: { mode: MatchGameMode; completion_reason: string | null } | null,
+): RatingTurnKind {
+  if (['in_progress', 'voided', 'invalid'].includes(turn.status)) {
+    return 'ignored';
+  }
+  if (turn.status === 'bust' || turn.is_bust === 1) {
+    return 'bust';
+  }
+  if (turn.status === 'checkout' || turn.is_checkout === 1) {
+    return 'checkout';
+  }
+  if (turn.status === 'game_end') {
+    if (
+      game?.mode === 'zero_one' &&
+      (turn.end_remaining_score === 0 || game.completion_reason === 'checkout')
+    ) {
+      return 'checkout';
+    }
+    if (game?.mode === 'cricket') {
+      return 'normal';
+    }
+    return 'ignored';
+  }
+  return 'normal';
+}
+
 async function getZeroOneRatingTotalsForGamePlayer(
   db: GameDatabaseExecutor,
   gameId: string,
   gamePlayerId: string,
 ) {
+  const game = await db.getFirstAsync<{
+    mode: MatchGameMode;
+    completion_reason: string | null;
+  }>('SELECT mode, completion_reason FROM game_sessions WHERE id = ?', gameId);
   const rows = await getCanonicalTurnDartCounts(db, gameId, gamePlayerId);
 
   return rows.reduce(
     (sum, row) => {
-      if (!['confirmed', 'bust', 'checkout'].includes(row.status) || row.canonicalDarts === 0) {
+      const ratingTurnKind = resolveRatingTurnKind(row, game);
+      if (ratingTurnKind === 'ignored' || row.canonicalDarts === 0) {
         return sum;
       }
       const ratingDarts =
-        row.is_bust === 1 || row.status === 'bust'
+        ratingTurnKind === 'bust'
           ? row.canonicalDarts
-          : row.is_checkout === 1 || row.status === 'checkout'
+          : ratingTurnKind === 'checkout'
             ? row.canonicalDarts
             : 3;
       return {
-        effectiveScore:
-          sum.effectiveScore + (row.is_bust === 1 || row.status === 'bust' ? 0 : row.applied_score),
+        effectiveScore: sum.effectiveScore + (ratingTurnKind === 'bust' ? 0 : row.applied_score),
         ratingDarts: sum.ratingDarts + ratingDarts,
         legacyDartCountFallbackUsed:
           sum.legacyDartCountFallbackUsed ||

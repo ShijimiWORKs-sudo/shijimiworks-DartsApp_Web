@@ -99,6 +99,7 @@ MATCH observation repair:
 - Legacy detection compares raw canonical turn/dart aggregation against `game_player_results`, `match_player_results`, latest `rating_evaluations`, and `rating_evaluation_games`
 - Stored `extra_stats_json.schemaVersion` alone is not trusted when deciding whether MATCH 01 PPD is current
 - Canonical completed-turn dart counts use `max(turns.dart_count, active dart rows)` so legacy rows with a missing final checkout dart can still restore Rating darts and MATCH total darts
+- MATCH turn aggregation resolves status meaning before Rating stats: 01 `game_end` with `is_checkout = 1`, `end_remaining_score = 0`, or `completion_reason = checkout` is treated as checkout, while CRICKET `game_end` remains a counted normal MPR turn
 - When `turns.dart_count` is used because it exceeds active dart rows, `extra_stats_json` stores `legacyDartCountFallbackUsed` and per-turn fallback details for audit/debugging
 - If the stored Rating Evaluation no longer matches the canonical MATCH observation, a new `source_revision` is created
 - The new revision is passed to Rating recalculation so old Evaluations/Snapshots are invalidated and Profile is rebuilt from the latest valid Snapshot
@@ -177,6 +178,7 @@ Added coverage:
 - Rating Index conversion clamps above-anchor PPD to Index 18 without clamping the raw stored PPD
 - Legacy MATCH repair rebuilds stale 60.00 PPD / 180.00 3DA summaries from raw 501-in-9 checkout turns, creates a new source revision, invalidates the old Snapshot, rebuilds Profile, and is idempotent on the second run
 - Legacy MATCH repair covers `turns.dart_count = 3` with only 2 active DART rows, restoring 501-in-9 PPD to `55667`, 3DA to `167000`, and MATCH total darts to 18 in the service-level fixture
+- Legacy MATCH repair covers a final 01 CHECKOUT TURN stored as `game_end`, ensuring the final 141-point turn is included in effective score and Rating darts
 - MATCH result repair failures stay on the result screen with a generic retry message while logging the original error with `console.warn`
 
 Final test suite result during implementation:
