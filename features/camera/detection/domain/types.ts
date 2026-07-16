@@ -6,7 +6,7 @@ import type {
   TestDetectionCandidate,
 } from '../../lan/domain/protocol';
 
-export type CameraOperationMode = 'local_preview' | 'local_game' | 'paired_node';
+export type CameraOperationMode = 'local_preview' | 'local_game' | 'local_count_up' | 'paired_node';
 
 export type GameAuthority = 'camera_pc' | 'game_pc' | 'none';
 

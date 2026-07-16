@@ -87,7 +87,7 @@ export class CandidateRouter {
 }
 
 export function resolveCandidateDestination(context: CandidateRouterContext): CandidateDestination {
-  if (context.operationMode === 'local_game') {
+  if (context.operationMode === 'local_game' || context.operationMode === 'local_count_up') {
     return 'local_game';
   }
   if (context.operationMode === 'paired_node') {
