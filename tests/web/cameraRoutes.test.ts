@@ -11,13 +11,14 @@ function readRepoFile(relativePath: string) {
 
 test('camera routes expose intro, capture, review, accepted, LAN host, Camera Node, and local camera screens', () => {
   assert.match(readRepoFile('app/camera/index.tsx'), /カメラ撮影テスト/);
-  assert.match(readRepoFile('app/camera/home.tsx'), /Camera Home/);
+  assert.match(readRepoFile('app/camera/home.tsx'), /カメラPC単体モード/);
   assert.match(readRepoFile('app/camera/capture.tsx'), /CameraView/);
   assert.match(readRepoFile('app/camera/review.tsx'), /撮影結果/);
   assert.match(readRepoFile('app/camera/accepted.tsx'), /撮影完了/);
   assert.match(readRepoFile('app/camera/lan.tsx'), /LAN Camera 接続/);
   assert.match(readRepoFile('app/camera/node.tsx'), /Camera Node/);
   assert.match(readRepoFile('app/camera/local-game/index.tsx'), /このPCでゲーム/);
+  assert.match(readRepoFile('app/camera/local-count-up/settings.tsx'), /カメラCOUNT-UP設定/);
   assert.match(readRepoFile('app/camera/awards/index.tsx'), /Award確認/);
 });
 
