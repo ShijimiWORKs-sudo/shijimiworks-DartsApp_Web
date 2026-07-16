@@ -259,7 +259,7 @@ export default function CameraLocalCountUpPlayScreen() {
               </View>
             </View>
             <Text style={styles.meta}>
-              Turn {game?.currentTurnScore ?? 0} / Dart {activeDarts.length + 1}/3 /{' '}
+              Turn {game?.currentTurnScore ?? 0} / Dart {Math.min(activeDarts.length + 1, 3)}/3 /{' '}
               {game?.status ?? 'loading'}
             </Text>
           </Card>
