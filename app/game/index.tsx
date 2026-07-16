@@ -202,8 +202,8 @@ export default function GameHubScreen() {
         />
         <View style={styles.cardAction}>
           <AppButton
-            label="カメラ撮影テストへ"
-            onPress={() => router.push('/camera')}
+            label="LAN Camera接続へ"
+            onPress={() => router.push('/camera/lan')}
             disabled={!isAvailable}
             variant="secondary"
           />

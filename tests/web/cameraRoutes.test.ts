@@ -9,11 +9,13 @@ function readRepoFile(relativePath: string) {
   return fs.readFileSync(path.join(root, relativePath), 'utf8');
 }
 
-test('camera routes expose intro, capture, review, and accepted screens', () => {
+test('camera routes expose intro, capture, review, accepted, LAN host, and Camera Node screens', () => {
   assert.match(readRepoFile('app/camera/index.tsx'), /カメラ撮影テスト/);
   assert.match(readRepoFile('app/camera/capture.tsx'), /CameraView/);
   assert.match(readRepoFile('app/camera/review.tsx'), /撮影結果/);
   assert.match(readRepoFile('app/camera/accepted.tsx'), /撮影完了/);
+  assert.match(readRepoFile('app/camera/lan.tsx'), /LAN Camera 接続/);
+  assert.match(readRepoFile('app/camera/node.tsx'), /Camera Node/);
 });
 
 test('camera capture screen uses CameraView and useCameraPermissions through session hook', () => {
@@ -45,7 +47,7 @@ test('camera foundation does not persist images to sqlite or call recognition li
 test('Game Hub links to camera capture test without changing game mode routes', () => {
   const gameHub = readRepoFile('app/game/index.tsx');
 
-  assert.match(gameHub, /router\.push\('\/camera'\)/);
+  assert.match(gameHub, /router\.push\('\/camera\/lan'\)/);
   assert.match(gameHub, /router\.push\('\/game\/count-up\/settings'\)/);
   assert.match(gameHub, /router\.push\('\/game\/01\/settings'\)/);
   assert.match(gameHub, /router\.push\('\/game\/cricket\/settings'\)/);
@@ -58,4 +60,24 @@ test('app config declares expo-camera plugin and camera permission copy', () => 
   assert.match(appConfig, /"expo-camera"/);
   assert.match(appConfig, /"cameraPermission"/);
   assert.match(appConfig, /NSCameraUsageDescription/);
+});
+
+test('LAN camera node is the only LAN route mounting CameraView', () => {
+  const lanHostRoute = readRepoFile('app/camera/lan.tsx');
+  const nodeRoute = readRepoFile('app/camera/node.tsx');
+
+  assert.doesNotMatch(lanHostRoute, /<CameraView/);
+  assert.match(nodeRoute, /<CameraView/);
+  assert.match(nodeRoute, /localhost/);
+});
+
+test('LAN camera scripts expose relay, camera node, and game PC web ports', () => {
+  const packageJson = readRepoFile('package.json');
+
+  assert.match(packageJson, /"camera:relay"/);
+  assert.match(packageJson, /8120/);
+  assert.match(packageJson, /"camera:node"/);
+  assert.match(packageJson, /8110/);
+  assert.match(packageJson, /"web:lan-main"/);
+  assert.match(packageJson, /8112/);
 });

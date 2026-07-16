@@ -79,6 +79,29 @@ npx.cmd expo export --platform web
 
 PC Webの詳細手順は `docs/PC_WEB_SETUP.md` と `docs/PC_WEB_QA_CHECKLIST.md` を参照してください。
 
+LAN Camera Node開発確認:
+
+ゲーム操作PC:
+
+```powershell
+npm.cmd run camera:relay
+npm.cmd run web:lan-main
+```
+
+カメラ判定PC:
+
+```powershell
+npm.cmd run camera:node
+```
+
+- ゲームPCは `ws://0.0.0.0:8120` でLAN relayを待ち受け、Webは `http://localhost:8112/camera/lan` を開きます。
+- カメラPCは必ず自身の `http://localhost:8110/camera/node` を開き、getUserMediaをlocalhost secure contextで実行します。
+- カメラPCから `http://ゲームPCのLAN-IP/camera/node` を開いてカメラを取得する構成は禁止です。
+- Windows Firewallが表示された場合は、プライベートネットワークだけ許可し、パブリックネットワークは許可しないでください。
+- 使用portはRelay `8120`、ゲームPC Web `8112`、カメラPC Web `8110` です。
+- 2台とも同じWi-Fiに接続してください。AP isolationが有効なWi-Fiでは接続できない場合があります。
+- 同一PC開発テストでは、Relayを起動後、`/camera/lan` と `/camera/node` を別タブで開き、Camera Nodeの接続先を `127.0.0.1:8120` にします。
+
 PC Web横長UI:
 
 - 1024px以上のWebでは上部ナビゲーションを表示し、主要導線をHOME / GAME / ACCOUNTへ集約します。
@@ -199,6 +222,7 @@ Phase 5では、1人用の単独STANDARD CRICKET縦断実装を追加してい�
 Phase 6では、2人対戦MATCH縦断実装を追加しています。
 Phase 8では、PC Web横長ゲームUI、Webトップナビ、1280x720向けのゲーム画面配置を追加しています。
 Phase 10Aでは、Web / iPhone Expo Go向けのカメラ静止画撮影基盤を追加しています。撮影画像は画面セッション内だけで扱い、DB保存、クラウド送信、画像認識、スコア判定は行いません。
+Phase 10Bでは、同一Wi-Fi上の別PCをCamera Nodeとして使うLAN WebSocket基盤を追加しています。Camera Nodeはlocalhostでカメラを開き、ゲームPCへテスト判定候補、座標、confidence、状態だけを送ります。
 
 - DBファイル名: `dartsapp_games.db`
 - 保存方式: `expo-sqlite`
@@ -220,6 +244,22 @@ Phase 10A Camera Foundation:
 - Webではbase64画像、Nativeではcache URIを画面セッション内で扱う
 - 撮影ガイドは画面overlayのみで、画像へ焼き込まない
 - DB保存、CommonOutbox作成、クラウド送信、OpenCV/ML/スコア判定は未実装
+
+Phase 10B LAN Camera Node:
+
+- Game PC route: `/camera/lan`
+- Camera Node route: `/camera/node`
+- Relay script: `npm.cmd run camera:relay`
+- Game PC Web: `npm.cmd run web:lan-main`
+- Camera Node Web: `npm.cmd run camera:node`
+- Relay: `ws://0.0.0.0:8120`
+- pairing: 6桁コード、短時間失効
+- heartbeat: 5秒、15秒無応答でoffline
+- reconnect: exponential backoff、最大30秒
+- TestDetectionCandidateのみ送信
+- 映像全体、base64画像、Account token、個人情報はLAN送信しない
+- 受信候補は手動で確定/拒否し、自動でゲーム入力へ反映しない
+- WebRTC、クラウド中継、OpenCV、ML、動体検出、スコア画像認識は未実装
 
 DB初期化時に以下を適用します。
 
