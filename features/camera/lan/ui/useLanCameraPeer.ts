@@ -67,6 +67,39 @@ export type LanCameraPeerState = {
   rejectCandidate: (candidateId: string, reason?: string) => void;
 };
 
+const LAN_CAMERA_SOCKET_CONNECTING = 0;
+const LAN_CAMERA_SOCKET_OPEN = 1;
+
+export type LanCameraConnectionStartPlan = {
+  shouldCreateSocket: boolean;
+  status: Extract<LanCameraPeerStatus, 'connecting' | 'reconnecting'> | null;
+};
+
+export function isLanCameraSocketStartingOrOpen(readyState: number | null | undefined): boolean {
+  return readyState === LAN_CAMERA_SOCKET_CONNECTING || readyState === LAN_CAMERA_SOCKET_OPEN;
+}
+
+export function planLanCameraConnectionStart(input: {
+  socketReadyState: number | null | undefined;
+  reconnectAttempt: number;
+}): LanCameraConnectionStartPlan {
+  if (isLanCameraSocketStartingOrOpen(input.socketReadyState)) {
+    return {
+      shouldCreateSocket: false,
+      status: null,
+    };
+  }
+
+  return {
+    shouldCreateSocket: true,
+    status: input.reconnectAttempt > 0 ? 'reconnecting' : 'connecting',
+  };
+}
+
+export function getLanCameraConnectionFailureMessage(): string {
+  return 'LAN relayへ接続できませんでした。接続先を確認してください。';
+}
+
 export function useLanCameraPeer(options: LanCameraPeerOptions): LanCameraPeerState {
   const [status, setStatus] = useState<LanCameraPeerStatus>('idle');
   const [detectionState, setDetectionState] = useState<LanCameraDetectionState>('stopped');
@@ -141,6 +174,7 @@ export function useLanCameraPeer(options: LanCameraPeerOptions): LanCameraPeerSt
 
   const disconnect = useCallback(() => {
     shouldReconnectRef.current = false;
+    reconnectAttemptRef.current = 0;
     clearTimers();
     socketRef.current?.close();
     socketRef.current = null;
@@ -232,15 +266,31 @@ export function useLanCameraPeer(options: LanCameraPeerOptions): LanCameraPeerSt
   }, []);
 
   const connect = useCallback(() => {
-    if (!options.enabled || socketRef.current?.readyState === WebSocket.OPEN) {
+    const startPlan = planLanCameraConnectionStart({
+      socketReadyState: socketRef.current?.readyState,
+      reconnectAttempt: reconnectAttemptRef.current,
+    });
+
+    if (!startPlan.shouldCreateSocket) {
       return;
     }
 
     shouldReconnectRef.current = true;
-    setStatus(reconnectAttemptRef.current > 0 ? 'reconnecting' : 'connecting');
+    if (startPlan.status) {
+      setStatus(startPlan.status);
+    }
     setLastError(null);
     const openedAt = Date.now();
-    const socket = new WebSocket(options.relayUrl);
+    let socket: WebSocket;
+    try {
+      socket = new WebSocket(options.relayUrl);
+    } catch (error) {
+      console.warn('LAN camera WebSocket creation failed.', error);
+      shouldReconnectRef.current = false;
+      setStatus('error');
+      setLastError(getLanCameraConnectionFailureMessage());
+      return;
+    }
     socketRef.current = socket;
 
     socket.onopen = () => {
@@ -262,7 +312,7 @@ export function useLanCameraPeer(options: LanCameraPeerOptions): LanCameraPeerSt
     };
 
     socket.onerror = () => {
-      setLastError('LAN relayへ接続できませんでした。');
+      setLastError(getLanCameraConnectionFailureMessage());
       setStatus('error');
     };
 
@@ -282,7 +332,7 @@ export function useLanCameraPeer(options: LanCameraPeerOptions): LanCameraPeerSt
       setStatus('reconnecting');
       reconnectTimerRef.current = setTimeout(connect, delay);
     };
-  }, [handleMessage, options.enabled, options.relayUrl, options.role, pairRequest, sendHeartbeat]);
+  }, [handleMessage, options.relayUrl, options.role, pairRequest, sendHeartbeat]);
 
   const sendCameraReady = useCallback(
     (isReady: boolean) => {

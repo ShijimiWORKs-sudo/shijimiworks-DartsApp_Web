@@ -38,6 +38,8 @@ export default function LanCameraNodeScreen() {
   });
   const isLocalhost = isRunningOnLocalhost();
   const { sendCameraReady, status } = lanPeer;
+  const isConnectionStarting = status === 'connecting' || status === 'reconnecting';
+  const isConnectDisabled = pairingCode.length !== 6 || isConnectionStarting;
 
   useEffect(() => {
     void loadLanCameraNodeSettings().then((settings) => {
@@ -109,9 +111,18 @@ export default function LanCameraNodeScreen() {
         <Text style={styles.label}>Camera Node名</Text>
         <TextInput value={cameraNodeName} onChangeText={setCameraNodeName} style={styles.input} />
         <View style={styles.actionRow}>
-          <AppButton label="接続" onPress={connect} disabled={pairingCode.length !== 6} />
+          <AppButton
+            label={isConnectionStarting ? '接続中...' : '接続'}
+            onPress={connect}
+            disabled={isConnectDisabled}
+          />
           <AppButton label="切断" onPress={lanPeer.disconnect} variant="secondary" />
-          <AppButton label="再接続" onPress={connect} variant="secondary" />
+          <AppButton
+            label="再接続"
+            onPress={connect}
+            variant="secondary"
+            disabled={isConnectionStarting || pairingCode.length !== 6}
+          />
         </View>
       </Card>
 
