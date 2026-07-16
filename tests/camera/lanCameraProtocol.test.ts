@@ -13,7 +13,12 @@ import {
   parseLanCameraMessage,
   serializeLanCameraMessage,
   upsertCandidateLog,
+  type GameSetupRequest,
 } from '../../features/camera/lan/domain/protocol';
+import {
+  canStartGameFromSetupMessage,
+  createGameSetupRequest,
+} from '../../features/camera/lan/application/gameSetupMessages';
 
 test('LAN camera pairing code is always six digits', () => {
   assert.equal(
@@ -89,6 +94,25 @@ test('LAN camera messages serialize and parse with protocol fields', () => {
   assert.equal(parsed?.type, 'test_detection_candidate');
   assert.equal(parsed?.sessionId, 'session-1');
   assert.equal(parseLanCameraMessage('{broken'), null);
+});
+
+test('LAN camera protocol supports approved game setup request flow messages', () => {
+  const request: GameSetupRequest = createGameSetupRequest({
+    sessionId: 'session-1',
+    cameraNodeId: 'node-1',
+    requestId: 'setup-1',
+    mode: 'count_up',
+    settings: { bullRule: 'fat_bull' },
+    now: new Date('2026-07-16T00:00:00.000Z'),
+  });
+
+  const parsed = parseLanCameraMessage(serializeLanCameraMessage(request));
+
+  assert.equal(parsed?.type, 'game_setup_request');
+  assert.equal(parsed && 'mode' in parsed ? parsed.mode : null, 'count_up');
+  assert.equal(canStartGameFromSetupMessage('game_setup_request'), false);
+  assert.equal(canStartGameFromSetupMessage('game_setup_accepted'), true);
+  assert.equal(canStartGameFromSetupMessage('game_started'), true);
 });
 
 test('duplicate candidate ids are logged but not accepted twice', () => {

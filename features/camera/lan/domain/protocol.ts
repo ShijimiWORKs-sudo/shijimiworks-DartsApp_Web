@@ -13,6 +13,7 @@ export type LanCameraSegment =
   1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20 | 25;
 export type LanCameraMultiplier = 0 | 1 | 2 | 3;
 export type LanCameraCandidateSource = 'camera_node';
+export type LanCameraGameSetupMode = 'count_up' | 'zero_one' | 'cricket' | 'match';
 export type LanCameraRejectionReason =
   | 'INVALID_JSON'
   | 'INVALID_MESSAGE'
@@ -128,6 +129,49 @@ export type ErrorMessage = LanCameraBaseMessage & {
   message: string;
 };
 
+export type GameSetupRequest = LanCameraBaseMessage & {
+  type: 'game_setup_request';
+  cameraNodeId: string;
+  requestId: string;
+  mode: LanCameraGameSetupMode;
+  settings: Record<string, unknown>;
+};
+
+export type GameSetupAccepted = LanCameraBaseMessage & {
+  type: 'game_setup_accepted';
+  requestId: string;
+  acceptedAt: string;
+};
+
+export type GameSetupRejected = LanCameraBaseMessage & {
+  type: 'game_setup_rejected';
+  requestId: string;
+  reason: string;
+};
+
+export type GameStarted = LanCameraBaseMessage & {
+  type: 'game_started';
+  requestId: string;
+  gameId: string;
+  mode: LanCameraGameSetupMode;
+  authority: 'game_pc';
+};
+
+export type GameStateSnapshot = LanCameraBaseMessage & {
+  type: 'game_state_snapshot';
+  gameId: string;
+  mode: LanCameraGameSetupMode;
+  status: string;
+  payload: Record<string, unknown>;
+};
+
+export type GameEnded = LanCameraBaseMessage & {
+  type: 'game_ended';
+  gameId: string;
+  mode: LanCameraGameSetupMode;
+  reason: string;
+};
+
 export type LanCameraMessage =
   | PairRequest
   | PairAccepted
@@ -142,7 +186,13 @@ export type LanCameraMessage =
   | DetectionCandidate
   | DetectionAccepted
   | DetectionRejected
-  | ErrorMessage;
+  | ErrorMessage
+  | GameSetupRequest
+  | GameSetupAccepted
+  | GameSetupRejected
+  | GameStarted
+  | GameStateSnapshot
+  | GameEnded;
 
 export type LanCameraCandidateLogEntry = {
   candidate: TestDetectionCandidate | DetectionCandidate;
