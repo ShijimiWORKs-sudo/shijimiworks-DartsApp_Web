@@ -9,7 +9,7 @@ Expo Router のルート画面を配置します。
 - `app/index.tsx`: 初期設定
 - `app/home.tsx`: ホーム、ゲーム開始/再開導線
 - `app/game*.tsx`: ゲームハブ、COUNT-UP設定/プレイ/結果、01設定/プレイ/結果、CRICKET設定/プレイ/結果、MATCH設定/プレイ/CHOICE/結果
-- `app/camera*.tsx`: Phase 10Aのカメラ撮影基盤、静止画撮影、レビュー、採用確認
+- `app/camera*.tsx`: Phase 10Aのカメラ撮影基盤、静止画撮影、レビュー、採用確認、Phase 10BのLAN Camera Game PC / Camera Node
 - `app/account*.tsx`: ローカルAccount登録、共通Account ID表示、Rating状態表示
 - `app/practice*.tsx`: 練習メニューと履歴
 - `app/record.tsx`: 練習記録入力
@@ -79,7 +79,7 @@ Expo Router のルート画面を配置します。
 
 `AppStateContext` へ投擲履歴やMATCH履歴を混在させません。ゲームの正本は `dartsapp_games.db` のSQLite、既存MVP状態の正本はAsyncStorageです。
 
-カメラ撮影基盤はPhase 10A時点ではSQLiteとAsyncStorageへ撮影画像を書き込みません。Webのbase64画像とNativeのcache URIは、画面セッション内メモリだけで撮影、レビュー、採用確認へ渡します。
+カメラ撮影基盤はSQLiteへ撮影画像を書き込みません。Phase 10AのWeb base64画像とNative cache URIは、画面セッション内メモリだけで撮影、レビュー、採用確認へ渡します。Phase 10BのLAN Camera Nodeは映像全体をLAN送信せず、スコア候補、正規化座標、confidence、heartbeat、状態だけをRelay経由で送ります。
 
 ## features/game/
 
@@ -197,6 +197,19 @@ Phase 10Aでは、Web / iPhone Expo Goで使えるカメラ静止画撮影基盤
 初期カメラはbackです。`onCameraReady` 前は撮影できません。前面/背面切替後はreadyをfalseへ戻し、再度readyになるまで撮影を無効化します。`CameraView`は撮影画面で1つだけmountし、画面離脱時にunmountします。撮影ガイドはoverlayであり、撮影画像へ焼き込みません。
 
 Phase 10Aでは画像認識、OpenCV、ML、スコア判定、DB保存、CommonOutbox、クラウド送信、音声、動画録画は実装しません。
+
+Phase 10BではLAN Camera Node基盤を追加します。
+
+- `features/camera/lan/domain/protocol.ts`: LAN message型、protocol version、pairing、heartbeat、reconnect、TestDetectionCandidate
+- `features/camera/lan/application/lanCameraSettings.ts`: Camera Node側の最終接続情報をAsyncStorageへ保存
+- `features/camera/lan/ui/useLanCameraPeer.ts`: Browser WebSocket client、pairing、heartbeat、offline判定、再接続、候補ログ、accept/reject
+- `scripts/start-lan-camera-relay.cjs`: ゲームPC側で `ws://0.0.0.0:8120` を待ち受けるLAN relay
+- `/camera/lan`: ゲーム操作PC側。6桁pairingコードを表示し、Camera Node接続、heartbeat、latency、候補受信、確定/拒否を扱う
+- `/camera/node`: カメラ判定PC側。localhostでCameraViewを開き、ゲームPCのRelayへTestDetectionCandidateだけを送信する
+
+Pairingコードは短時間で失効します。未認証Nodeの候補、protocolVersion不一致、sessionId不一致、重複candidateIdは拒否します。候補確定は手動操作を必須とし、Phase 10BではゲームDART入力やRatingへ自動反映しません。
+
+Phase 10BではWebRTC映像配信、クラウド中継、OpenCV、ML、スコア画像認識、盤面キャリブレーション、動体検出、自動確定、DartsSupportApp通信、Rating変更、migration追加は実装しません。
 
 ## features/game/domain/rating/
 
