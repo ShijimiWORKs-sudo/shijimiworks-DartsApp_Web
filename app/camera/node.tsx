@@ -169,7 +169,7 @@ export default function LanCameraNodeScreen() {
       <Card>
         <SectionTitle
           title="テスト候補送信"
-          subtitle="Phase 10Bでは本物の画像認識は行いません。"
+          subtitle="LAN未接続でも候補生成と履歴確認は利用できます。接続済みの場合だけゲームPCへ送信します。"
           tone="card"
         />
         <View style={styles.actionRow}>
@@ -184,7 +184,6 @@ export default function LanCameraNodeScreen() {
                 normalizedY: 0.22,
               })
             }
-            disabled={lanPeer.status !== 'paired'}
           />
           <AppButton
             label="T20候補を送信"
@@ -197,7 +196,6 @@ export default function LanCameraNodeScreen() {
                 normalizedY: 0.18,
               })
             }
-            disabled={lanPeer.status !== 'paired'}
           />
           <AppButton
             label="Inner Bull候補を送信"
@@ -210,7 +208,6 @@ export default function LanCameraNodeScreen() {
                 normalizedY: 0.5,
               })
             }
-            disabled={lanPeer.status !== 'paired'}
           />
           <AppButton
             label="低信頼度候補を送信"
@@ -223,11 +220,22 @@ export default function LanCameraNodeScreen() {
                 normalizedY: 0.43,
               })
             }
-            disabled={lanPeer.status !== 'paired'}
             variant="secondary"
           />
           <AppButton label="接続切断を再現" onPress={lanPeer.disconnect} variant="danger" />
         </View>
+        {lanPeer.candidateLog.length > 0 ? (
+          <View style={styles.candidateList}>
+            {lanPeer.candidateLog.slice(0, 5).map((entry) => (
+              <Text key={`${entry.candidate.candidateId}:${entry.receivedAt}`} style={styles.meta}>
+                {entry.candidate.segment === 25 ? 'BULL' : entry.candidate.segment} x
+                {entry.candidate.multiplier} / {entry.status}
+              </Text>
+            ))}
+          </View>
+        ) : (
+          <Text style={styles.meta}>候補履歴はまだありません。</Text>
+        )}
       </Card>
     </ScreenShell>
   );
@@ -298,6 +306,16 @@ const styles = StyleSheet.create({
     color: colors.danger,
     fontSize: 13,
     fontWeight: '800',
+    lineHeight: 19,
+  },
+  candidateList: {
+    marginTop: 12,
+    gap: 4,
+  },
+  meta: {
+    color: colors.textMuted,
+    fontSize: 13,
+    fontWeight: '700',
     lineHeight: 19,
   },
   cameraFrame: {
