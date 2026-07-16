@@ -70,8 +70,8 @@ test('camera COUNT-UP routes expose playable MVP controls without WebSocket depe
   assert.match(settings, /音声・演出/);
   assert.match(play, /CameraView/);
   assert.match(play, /基準フレーム取得/);
-  assert.match(play, /投擲後フレーム判定/);
-  assert.match(play, /盤面上で位置修正/);
+  assert.match(play, /現在画像を解析/);
+  assert.match(play, /位置修正/);
   assert.match(play, /手動入力/);
   assert.match(play, /Undo/);
   assert.match(play, /Redo/);

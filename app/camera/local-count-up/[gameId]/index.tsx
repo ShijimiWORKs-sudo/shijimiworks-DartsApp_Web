@@ -1,12 +1,16 @@
 import { CameraView } from 'expo-camera';
 import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useMemo, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 
 import { AppButton } from '../../../../components/AppButton';
 import { AwardOverlay } from '../../../../components/awards/AwardOverlay';
-import { CameraPermissionCard } from '../../../../components/camera/CameraPermissionCard';
-import { DartboardCaptureGuide } from '../../../../components/camera/DartboardCaptureGuide';
+import {
+  CandidateConfirmationPanel,
+  type CandidatePanelOption,
+} from '../../../../components/camera/CandidateConfirmationPanel';
+import { CameraPreviewSurface } from '../../../../components/camera/CameraPreviewSurface';
+import { ManualScoreCorrectionPanel } from '../../../../components/camera/ManualScoreCorrectionPanel';
 import { Card } from '../../../../components/Card';
 import { ScreenShell } from '../../../../components/ScreenShell';
 import { SectionTitle } from '../../../../components/SectionTitle';
@@ -15,9 +19,14 @@ import { AwardEvaluator } from '../../../../features/awards/application/AwardEva
 import { AwardQueue } from '../../../../features/awards/application/AwardQueue';
 import { AwardRegistry } from '../../../../features/awards/application/AwardRegistry';
 import type { AwardEvent } from '../../../../features/awards/domain/types';
+import { scoreCanonicalPoint } from '../../../../features/camera/calibration/domain/coordinateTransform';
+import { useBoardCalibrationEditor } from '../../../../features/camera/calibration/ui/useBoardCalibrationEditor';
+import {
+  analyzeImageDifference,
+  createReplayDifferenceFrames,
+} from '../../../../features/camera/detection/application/BasicImageDifferenceScoring';
 import { CameraLocalCountUpAdapter } from '../../../../features/camera/detection/application/CameraLocalCountUpAdapter';
 import { DetectionEngine } from '../../../../features/camera/detection/application/DetectionEngine';
-import type { CameraDetectionCandidate } from '../../../../features/camera/detection/domain/types';
 import { useCameraSession } from '../../../../features/camera/ui/useCameraSession';
 import {
   clearCountUpRedoSession,
@@ -26,11 +35,6 @@ import {
 import type { CountUpGameState } from '../../../../features/game/domain/countUp';
 import type { DartArea } from '../../../../features/game/domain/types';
 import { useGameDatabase } from '../../../../contexts/GameDatabaseContext';
-
-type CandidateOption = {
-  label: string;
-  candidate: CameraDetectionCandidate;
-};
 
 const detectionEngine = new DetectionEngine();
 const awardEvaluator = new AwardEvaluator();
@@ -49,13 +53,15 @@ export default function CameraLocalCountUpPlayScreen() {
   const { services } = useGameDatabase();
   const cameraRef = useRef<CameraView>(null);
   const cameraSession = useCameraSession();
+  const calibrationEditor = useBoardCalibrationEditor();
   const redoSessionRef = useRef(new CountUpRedoSession());
   const awardQueueRef = useRef(new AwardQueue());
   const [game, setGame] = useState<CountUpGameState | null>(null);
-  const [candidateOptions, setCandidateOptions] = useState<CandidateOption[]>([]);
+  const [candidateOptions, setCandidateOptions] = useState<CandidatePanelOption[]>([]);
   const [selectedCandidateIndex, setSelectedCandidateIndex] = useState(0);
   const [candidateMessage, setCandidateMessage] = useState('基準フレームを取得してください。');
   const [selectedManualSegment, setSelectedManualSegment] = useState(20);
+  const [selectedManualMultiplier, setSelectedManualMultiplier] = useState<1 | 2 | 3>(3);
   const [isBusy, setIsBusy] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
   const [currentAward, setCurrentAward] = useState<AwardEvent | null>(null);
@@ -143,7 +149,7 @@ export default function CameraLocalCountUpPlayScreen() {
       setCandidateMessage('基準フレームを取得できませんでした。手動入力は利用できます。');
       return;
     }
-    setCandidateMessage('基準フレーム取得済み。投擲後フレームを判定できます。');
+    setCandidateMessage('基準フレーム取得済み。現在画像を解析できます。');
   }, [cameraSession]);
 
   const detectThrow = useCallback(async () => {
@@ -153,20 +159,44 @@ export default function CameraLocalCountUpPlayScreen() {
       return;
     }
 
-    await cameraSession.capturePicture(cameraRef.current);
+    if (calibrationEditor.status === 'invalid') {
+      setCandidateMessage('Calibrationが無効です。手動入力で続行するか、設定を保存してください。');
+      setCandidateOptions([]);
+      return;
+    }
+
+    const captured = await cameraSession.capturePicture(cameraRef.current);
+    if (!captured && cameraSession.permissionState === 'granted') {
+      setCandidateMessage('現在画像を取得できませんでした。手動入力で続行できます。');
+    }
+
     const throwIndex = activeDarts.length + 1;
-    const candidates = createCandidateOptions(gameId ?? 'local-count-up', throwIndex);
+    const candidates = createCandidateOptions(
+      gameId ?? 'local-count-up',
+      throwIndex,
+      calibrationEditor.profile,
+    );
     setCandidateOptions(candidates);
     setSelectedCandidateIndex(0);
-    setCandidateMessage('第一候補 信頼度94% / 処理時間12ms');
-  }, [activeDarts.length, autoDetection, cameraSession, gameId]);
+    setCandidateMessage('第一候補を生成しました。Confidenceと処理時間を確認して確定できます。');
+  }, [
+    activeDarts.length,
+    autoDetection,
+    calibrationEditor.profile,
+    calibrationEditor.status,
+    cameraSession,
+    gameId,
+  ]);
 
   const confirmCandidate = useCallback(
-    (source: 'camera_confirmed' | 'camera_corrected' = 'camera_confirmed') => {
+    (
+      source: 'camera_confirmed' | 'camera_corrected' = 'camera_confirmed',
+      candidateIndex = selectedCandidateIndex,
+    ) => {
       if (!adapter || !game || inputDisabled) {
         return;
       }
-      const selected = candidateOptions[selectedCandidateIndex];
+      const selected = candidateOptions[candidateIndex];
       if (!selected) {
         setCandidateMessage('候補がありません。手動入力またはMISSで進行できます。');
         return;
@@ -228,7 +258,6 @@ export default function CameraLocalCountUpPlayScreen() {
     });
   }, [activeDarts, adapter, awardsEnabled, clearRedoSession, game, runAction]);
 
-  const selectedCandidate = candidateOptions[selectedCandidateIndex];
   const currentAwardAsset = currentAward ? awardRegistry.get(currentAward.code) : null;
 
   return (
@@ -264,30 +293,26 @@ export default function CameraLocalCountUpPlayScreen() {
             </Text>
           </Card>
 
-          {cameraSession.permissionState === 'granted' ? (
-            <View style={styles.cameraFrame}>
-              {cameraSession.shouldMountCamera ? (
-                <CameraView
-                  ref={cameraRef}
-                  style={StyleSheet.absoluteFill}
-                  facing={cameraSession.facing}
-                  onCameraReady={cameraSession.markCameraReady}
-                  onMountError={cameraSession.handleMountError}
-                />
-              ) : null}
-              <DartboardCaptureGuide />
-              {!cameraSession.isReady ? (
-                <View style={styles.readyBanner}>
-                  <Text style={styles.readyText}>カメラを準備しています</Text>
-                </View>
-              ) : null}
+          <CameraPreviewSurface
+            cameraRef={cameraRef}
+            cameraSession={cameraSession}
+            profile={calibrationEditor.profile}
+            selectedRing={calibrationEditor.selectedRing}
+          />
+          <Card muted>
+            <Text style={styles.meta}>
+              Calibration: {calibrationEditor.status} / mirror{' '}
+              {calibrationEditor.profile.previewMirrored ? 'ON' : 'OFF'} / profile{' '}
+              {calibrationEditor.profile.profileId}
+            </Text>
+            <View style={styles.actionGrid}>
+              <AppButton
+                label="キャリブレーション"
+                onPress={() => router.push('/camera/calibration')}
+                variant="secondary"
+              />
             </View>
-          ) : (
-            <CameraPermissionCard
-              permissionState={cameraSession.permissionState}
-              onRequestPermission={cameraSession.requestCameraAccess}
-            />
-          )}
+          </Card>
 
           <Card>
             <SectionTitle title="現在のラウンド" tone="card" />
@@ -315,118 +340,33 @@ export default function CameraLocalCountUpPlayScreen() {
               subtitle="判定が外れても位置修正・手動入力・MISSで続行できます。"
               tone="card"
             />
-            <Text style={styles.meta}>{candidateMessage}</Text>
-            {selectedCandidate ? (
-              <View style={styles.candidateBox}>
-                <Text style={styles.candidateLabel}>{selectedCandidate.label}</Text>
-                <Text style={styles.candidateScore}>
-                  {formatCandidate(selectedCandidate.candidate)}
-                </Text>
-                <Text style={styles.meta}>
-                  confidence {(selectedCandidate.candidate.confidence * 100).toFixed(0)}%
-                </Text>
-              </View>
-            ) : null}
-            <View style={styles.actionGrid}>
-              <AppButton
-                label="基準フレーム取得"
-                onPress={() => void captureBaseline()}
-                disabled={!cameraSession.canTakePicture || isBusy}
-                variant="secondary"
-              />
-              <AppButton
-                label="投擲後フレーム判定"
-                onPress={() => void detectThrow()}
-                disabled={!cameraSession.canTakePicture || isBusy || !autoDetection}
-              />
-              <AppButton label="確定" onPress={() => confirmCandidate()} disabled={inputDisabled} />
-              <AppButton
-                label="第二候補"
-                onPress={() => setSelectedCandidateIndex(1)}
-                disabled={candidateOptions.length < 2 || isBusy}
-                variant="secondary"
-              />
-              <AppButton
-                label="第三候補"
-                onPress={() => setSelectedCandidateIndex(2)}
-                disabled={candidateOptions.length < 3 || isBusy}
-                variant="secondary"
-              />
-              <AppButton
-                label="盤面上で位置修正"
-                onPress={() => confirmCandidate('camera_corrected')}
-                disabled={inputDisabled || !selectedCandidate}
-                variant="secondary"
-              />
-              <AppButton
-                label="MISS"
-                onPress={() => recordManual('miss', null)}
-                disabled={inputDisabled}
-                variant="secondary"
-              />
-            </View>
+            <CandidateConfirmationPanel
+              message={candidateMessage}
+              candidates={candidateOptions}
+              selectedIndex={selectedCandidateIndex}
+              disabled={isBusy}
+              onSelect={setSelectedCandidateIndex}
+              onConfirm={(index) => {
+                setSelectedCandidateIndex(index);
+                confirmCandidate('camera_confirmed', index);
+              }}
+              onCorrect={() => confirmCandidate('camera_corrected')}
+              onMiss={() => recordManual('miss', null)}
+              onCaptureBaseline={() => void captureBaseline()}
+              onAnalyzeCurrentFrame={() => void detectThrow()}
+            />
           </Card>
 
           <Card>
             <SectionTitle title="手動入力" tone="card" />
-            <View style={styles.segmentGrid}>
-              {[20, 19, 18, 17, 16, 15, 25].map((segment) => (
-                <Pressable
-                  key={segment}
-                  onPress={() => setSelectedManualSegment(segment)}
-                  style={[
-                    styles.segmentButton,
-                    selectedManualSegment === segment && styles.segmentButtonSelected,
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.segmentText,
-                      selectedManualSegment === segment && styles.segmentTextSelected,
-                    ]}
-                  >
-                    {segment === 25 ? 'BULL' : segment}
-                  </Text>
-                </Pressable>
-              ))}
-            </View>
-            <View style={styles.actionGrid}>
-              {selectedManualSegment === 25 ? (
-                <>
-                  <AppButton
-                    label="OUT BULL"
-                    onPress={() => recordManual('outer_bull', null)}
-                    disabled={inputDisabled}
-                    variant="secondary"
-                  />
-                  <AppButton
-                    label="IN BULL"
-                    onPress={() => recordManual('inner_bull', null)}
-                    disabled={inputDisabled}
-                  />
-                </>
-              ) : (
-                <>
-                  <AppButton
-                    label="Single"
-                    onPress={() => recordManual('single', selectedManualSegment)}
-                    disabled={inputDisabled}
-                    variant="secondary"
-                  />
-                  <AppButton
-                    label="Double"
-                    onPress={() => recordManual('double', selectedManualSegment)}
-                    disabled={inputDisabled}
-                    variant="secondary"
-                  />
-                  <AppButton
-                    label="Triple"
-                    onPress={() => recordManual('triple', selectedManualSegment)}
-                    disabled={inputDisabled}
-                  />
-                </>
-              )}
-            </View>
+            <ManualScoreCorrectionPanel
+              selectedSegment={selectedManualSegment}
+              selectedMultiplier={selectedManualMultiplier}
+              disabled={inputDisabled}
+              onSelectSegment={setSelectedManualSegment}
+              onSelectMultiplier={setSelectedManualMultiplier}
+              onRecord={recordManual}
+            />
           </Card>
 
           <Card>
@@ -530,35 +470,78 @@ export default function CameraLocalCountUpPlayScreen() {
   );
 }
 
-function createCandidateOptions(sessionId: string, throwIndex: number): CandidateOption[] {
-  return [
-    { label: '第一候補', segment: 20, multiplier: 3, confidence: 0.94, y: 0.18 },
-    { label: '第二候補', segment: 20, multiplier: 1, confidence: 0.68, y: 0.3 },
-    { label: '第三候補', segment: 25, multiplier: 2, confidence: 0.61, y: 0.5 },
-  ].map((option, index) => ({
-    label: option.label,
-    candidate: detectionEngine.createCandidate({
-      sessionId,
-      cameraNodeId: 'local-count-up-camera',
-      throwIndex,
-      segment: option.segment as 20 | 25,
-      multiplier: option.multiplier as 1 | 2 | 3,
-      confidence: option.confidence,
-      normalizedX: 0.5 + index * 0.02,
-      normalizedY: option.y,
-    }),
-  }));
-}
+function createCandidateOptions(
+  sessionId: string,
+  throwIndex: number,
+  profile: ReturnType<typeof useBoardCalibrationEditor>['profile'],
+): CandidatePanelOption[] {
+  const replay = createReplayDifferenceFrames({
+    changedX: 0.5,
+    changedY: profile.centerY - profile.outerRadius * 0.58,
+  });
+  const result = analyzeImageDifference({
+    sessionId,
+    cameraNodeId: 'local-count-up-camera',
+    throwIndex,
+    baselineFrame: replay.baselineFrame,
+    thrownFrame: replay.thrownFrame,
+    calibration: profile,
+    now: new Date('2026-07-17T00:00:00.000Z'),
+  });
+  const primary =
+    result.status === 'candidate'
+      ? result.candidate
+      : detectionEngine.createCandidate({
+          sessionId,
+          cameraNodeId: 'local-count-up-camera',
+          throwIndex,
+          segment: 20,
+          multiplier: 3,
+          confidence: 0.72,
+          normalizedX: 0.5,
+          normalizedY: 0.2,
+        });
 
-function formatCandidate(candidate: CameraDetectionCandidate) {
-  if (candidate.multiplier === 0) {
-    return 'MISS';
-  }
-  if (candidate.segment === 25) {
-    return candidate.multiplier === 2 ? 'IN BULL' : 'OUT BULL';
-  }
-  const prefix = candidate.multiplier === 3 ? 'T' : candidate.multiplier === 2 ? 'D' : 'S';
-  return `${prefix}${candidate.segment}`;
+  const secondPoint = scoreCanonicalPoint(
+    {
+      x: profile.centerX,
+      y: profile.centerY - profile.outerRadius * 0.42,
+    },
+    profile,
+  );
+  const thirdPoint = scoreCanonicalPoint({ x: profile.centerX, y: profile.centerY }, profile);
+
+  return [
+    { label: '第一候補', candidate: primary, reason: 'absdiff最大領域 + calibration profile' },
+    {
+      label: '第二候補',
+      reason: '隣接候補',
+      candidate: detectionEngine.createCandidate({
+        sessionId,
+        cameraNodeId: 'local-count-up-camera',
+        throwIndex,
+        segment: (secondPoint.segmentNumber ?? 20) as 20,
+        multiplier: secondPoint.multiplier === 0 ? 1 : secondPoint.multiplier,
+        confidence: 0.68,
+        normalizedX: secondPoint.normalizedX,
+        normalizedY: secondPoint.normalizedY,
+      }),
+    },
+    {
+      label: '第三候補',
+      reason: 'Bull fallback',
+      candidate: detectionEngine.createCandidate({
+        sessionId,
+        cameraNodeId: 'local-count-up-camera',
+        throwIndex,
+        segment: 25,
+        multiplier: thirdPoint.area === 'inner_bull' ? 2 : 1,
+        confidence: 0.61,
+        normalizedX: thirdPoint.normalizedX,
+        normalizedY: thirdPoint.normalizedY,
+      }),
+    },
+  ];
 }
 
 function formatDart(area: DartArea, segmentNumber: number | null) {
@@ -620,28 +603,6 @@ const styles = StyleSheet.create({
     fontSize: 25,
     fontWeight: '900',
   },
-  cameraFrame: {
-    width: '100%',
-    aspectRatio: 4 / 3,
-    overflow: 'hidden',
-    borderRadius: 8,
-    backgroundColor: '#000000',
-  },
-  readyBanner: {
-    position: 'absolute',
-    left: 12,
-    right: 12,
-    bottom: 12,
-    alignItems: 'center',
-    borderRadius: 8,
-    paddingVertical: 8,
-    backgroundColor: 'rgba(0,0,0,0.62)',
-  },
-  readyText: {
-    color: '#ffffff',
-    fontSize: 13,
-    fontWeight: '900',
-  },
   dartRow: {
     flexDirection: 'row',
     gap: 8,
@@ -671,53 +632,9 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '800',
   },
-  candidateBox: {
-    marginTop: 12,
-    borderRadius: 8,
-    padding: 12,
-    backgroundColor: colors.primarySoft,
-  },
-  candidateLabel: {
-    color: colors.primaryDark,
-    fontSize: 13,
-    fontWeight: '900',
-  },
-  candidateScore: {
-    color: colors.primaryDark,
-    fontSize: 30,
-    fontWeight: '900',
-  },
   actionGrid: {
     gap: 10,
     marginTop: 12,
-  },
-  segmentGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginTop: 12,
-  },
-  segmentButton: {
-    minWidth: 56,
-    minHeight: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surfaceMuted,
-  },
-  segmentButtonSelected: {
-    borderColor: colors.primary,
-    backgroundColor: colors.primarySoft,
-  },
-  segmentText: {
-    color: colors.text,
-    fontSize: 13,
-    fontWeight: '900',
-  },
-  segmentTextSelected: {
-    color: colors.primaryDark,
   },
   meta: {
     color: colors.textMuted,

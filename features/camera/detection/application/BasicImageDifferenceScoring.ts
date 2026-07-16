@@ -1,7 +1,9 @@
 import { DetectionEngine } from './DetectionEngine';
+import type { BoardCalibrationProfile } from '../../calibration/domain/types';
+import { scoreCanonicalPoint } from '../../calibration/domain/coordinateTransform';
 import type { SimpleBoardCalibration } from './SimpleBoardCalibration';
 import { scoreNormalizedPoint } from './SimpleBoardCalibration';
-import type { DetectionCandidate } from '../../lan/domain/protocol';
+import type { DetectionCandidate, LanCameraSegment } from '../../lan/domain/protocol';
 
 export type GrayscaleFrame = {
   width: number;
@@ -15,9 +17,10 @@ export type BasicImageDifferenceInput = {
   throwIndex: number;
   baselineFrame: GrayscaleFrame;
   thrownFrame: GrayscaleFrame;
-  calibration: SimpleBoardCalibration;
+  calibration: SimpleBoardCalibration | BoardCalibrationProfile;
   threshold?: number;
   now?: Date;
+  random?: () => number;
 };
 
 export type BasicImageDifferenceResult =
@@ -73,7 +76,7 @@ export function analyzeImageDifference(
   const y =
     Math.floor(strongestIndex / input.thrownFrame.width) /
     Math.max(input.thrownFrame.height - 1, 1);
-  const score = scoreNormalizedPoint({ x, y }, input.calibration);
+  const score = scorePointWithCalibration({ x, y }, input.calibration);
   const candidate = new DetectionEngine().createCandidate({
     sessionId: input.sessionId,
     cameraNodeId: input.cameraNodeId,
@@ -84,6 +87,7 @@ export function analyzeImageDifference(
     normalizedX: score.normalizedX,
     normalizedY: score.normalizedY,
     now: input.now,
+    random: input.random,
   });
 
   return {
@@ -91,4 +95,46 @@ export function analyzeImageDifference(
     candidate,
     processingMs: Date.now() - startedAt,
   };
+}
+
+export function createReplayDifferenceFrames(input: {
+  width?: number;
+  height?: number;
+  changedX: number;
+  changedY: number;
+  intensity?: number;
+}): { baselineFrame: GrayscaleFrame; thrownFrame: GrayscaleFrame } {
+  const width = input.width ?? 64;
+  const height = input.height ?? 64;
+  const baselineFrame = {
+    width,
+    height,
+    pixels: new Uint8ClampedArray(width * height),
+  };
+  const thrownFrame = {
+    width,
+    height,
+    pixels: new Uint8ClampedArray(width * height),
+  };
+  const x = Math.round(Math.min(1, Math.max(0, input.changedX)) * (width - 1));
+  const y = Math.round(Math.min(1, Math.max(0, input.changedY)) * (height - 1));
+  thrownFrame.pixels[y * width + x] = input.intensity ?? 255;
+  return { baselineFrame, thrownFrame };
+}
+
+function scorePointWithCalibration(
+  point: { x: number; y: number },
+  calibration: SimpleBoardCalibration | BoardCalibrationProfile,
+) {
+  if ('version' in calibration && calibration.version === 2) {
+    const score = scoreCanonicalPoint(point, calibration);
+    return {
+      segment: (score.segmentNumber ?? 25) as LanCameraSegment,
+      multiplier: score.multiplier,
+      normalizedX: score.normalizedX,
+      normalizedY: score.normalizedY,
+      confidence: 0.82,
+    };
+  }
+  return scoreNormalizedPoint(point, calibration);
 }

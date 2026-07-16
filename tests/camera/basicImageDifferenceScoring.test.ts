@@ -1,11 +1,15 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { analyzeImageDifference } from '../../features/camera/detection/application/BasicImageDifferenceScoring';
+import {
+  analyzeImageDifference,
+  createReplayDifferenceFrames,
+} from '../../features/camera/detection/application/BasicImageDifferenceScoring';
 import {
   createSimpleBoardCalibration,
   scoreNormalizedPoint,
 } from '../../features/camera/detection/application/SimpleBoardCalibration';
+import { createDefaultCalibrationProfile } from '../../features/camera/calibration/domain/profile';
 
 const calibration = createSimpleBoardCalibration({
   bullCenter: { x: 0.5, y: 0.5 },
@@ -67,6 +71,45 @@ test('basic image difference returns no_candidate when no significant change exi
   assert.equal(result.status, 'no_candidate');
   if (result.status === 'no_candidate') {
     assert.equal(result.reason, 'NO_SIGNIFICANT_CHANGE');
+  }
+});
+
+test('basic image difference replay fixture generates deterministic calibrated candidates', () => {
+  const profile = createDefaultCalibrationProfile(new Date('2026-07-17T00:00:00.000Z'));
+  const frames = createReplayDifferenceFrames({
+    width: 32,
+    height: 32,
+    changedX: profile.centerX,
+    changedY: profile.centerY - profile.outerRadius * 0.58,
+  });
+
+  const first = analyzeImageDifference({
+    sessionId: 'local-count-up',
+    cameraNodeId: 'camera-pc',
+    throwIndex: 1,
+    baselineFrame: frames.baselineFrame,
+    thrownFrame: frames.thrownFrame,
+    calibration: profile,
+    threshold: 20,
+    now: new Date('2026-07-17T00:00:00.000Z'),
+    random: () => 0.42,
+  });
+  const second = analyzeImageDifference({
+    sessionId: 'local-count-up',
+    cameraNodeId: 'camera-pc',
+    throwIndex: 1,
+    baselineFrame: frames.baselineFrame,
+    thrownFrame: frames.thrownFrame,
+    calibration: profile,
+    threshold: 20,
+    now: new Date('2026-07-17T00:00:00.000Z'),
+    random: () => 0.42,
+  });
+
+  assert.equal(first.status, 'candidate');
+  assert.equal(second.status, 'candidate');
+  if (first.status === 'candidate' && second.status === 'candidate') {
+    assert.deepEqual(first.candidate, second.candidate);
   }
 });
 
