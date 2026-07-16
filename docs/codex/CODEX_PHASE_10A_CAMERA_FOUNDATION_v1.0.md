@@ -317,12 +317,7 @@ components/camera/CapturedImageReview.tsx
 
 ```ts
 export type CameraPermissionState =
-  | 'loading'
-  | 'granted'
-  | 'denied'
-  | 'blocked'
-  | 'unavailable'
-  | 'error';
+  'loading' | 'granted' | 'denied' | 'blocked' | 'unavailable' | 'error';
 
 export type CameraFacing = 'back' | 'front';
 

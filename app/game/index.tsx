@@ -195,6 +195,22 @@ export default function GameHubScreen() {
       </Card>
 
       <Card>
+        <SectionTitle
+          title="カメラ撮影テスト"
+          subtitle="ダーツボードの静止画撮影とレビューだけを確認できます。スコア判定は行いません。"
+          tone="card"
+        />
+        <View style={styles.cardAction}>
+          <AppButton
+            label="カメラ撮影テストへ"
+            onPress={() => router.push('/camera')}
+            disabled={!isAvailable}
+            variant="secondary"
+          />
+        </View>
+      </Card>
+
+      <Card>
         <SectionTitle title="最近のゲーム" subtitle="完了済みゲームを表示します。" tone="card" />
         {recentResults.length > 0 ? (
           <View style={styles.resultList}>

@@ -19,7 +19,7 @@
       "buildNumber": "1",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
-        "NSCameraUsageDescription": "ダーツボード写真を撮影して、タップした刺さり位置からスコアを記録するためにカメラを使用します。",
+        "NSCameraUsageDescription": "ダーツボードの写真を撮影するためにカメラを使用します。",
         "NSPhotoLibraryUsageDescription": "保存済みのダーツボード写真を選択して、タップした刺さり位置からスコアを記録するために写真ライブラリを使用します。"
       }
     },
@@ -42,7 +42,13 @@
           }
         }
       ],
-      "expo-sqlite"
+      "expo-sqlite",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "ダーツボードの写真を撮影するためにカメラを使用します。"
+        }
+      ]
     ],
     "extra": {
       "router": {
