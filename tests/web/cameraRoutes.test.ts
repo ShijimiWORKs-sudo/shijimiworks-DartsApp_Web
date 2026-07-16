@@ -19,6 +19,7 @@ test('camera routes expose intro, capture, review, accepted, LAN host, Camera No
   assert.match(readRepoFile('app/camera/node.tsx'), /Camera Node/);
   assert.match(readRepoFile('app/camera/local-game/index.tsx'), /このPCでゲーム/);
   assert.match(readRepoFile('app/camera/local-count-up/settings.tsx'), /カメラCOUNT-UP設定/);
+  assert.match(readRepoFile('app/camera/calibration.tsx'), /Camera Calibration/);
   assert.match(readRepoFile('app/camera/awards/index.tsx'), /Award確認/);
 });
 

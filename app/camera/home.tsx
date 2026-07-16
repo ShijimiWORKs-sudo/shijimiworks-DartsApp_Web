@@ -27,7 +27,7 @@ export default function CameraHomeScreen() {
           />
           <AppButton
             label="キャリブレーション"
-            onPress={() => router.push('/camera/capture')}
+            onPress={() => router.push('/camera/calibration')}
             variant="secondary"
           />
           <AppButton

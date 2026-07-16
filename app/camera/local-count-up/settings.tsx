@@ -144,6 +144,11 @@ export default function CameraLocalCountUpSettingsScreen() {
           onPress={() => router.replace('/camera/home')}
           variant="secondary"
         />
+        <AppButton
+          label="キャリブレーション"
+          onPress={() => router.push('/camera/calibration')}
+          variant="secondary"
+        />
       </View>
     </ScreenShell>
   );
