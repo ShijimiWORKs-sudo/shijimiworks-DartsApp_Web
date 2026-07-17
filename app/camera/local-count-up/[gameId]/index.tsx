@@ -25,9 +25,12 @@ import { CameraLocalCountUpAdapter } from '../../../../features/camera/detection
 import {
   analyzePersistentBoardDifference,
   analyzeTemporalMotion,
+  createMedianBaselineFrame,
+  measureBaselineNoise,
   resizeAnalysisFrame,
   throwDetectionThresholds,
   toGrayscaleFrame,
+  type BaselineNoiseProfile,
   type CameraAnalysisFrame,
   type CameraFrameSource,
   type DetectionState,
@@ -51,6 +54,7 @@ const baselineRetryBackoffMs = 1000;
 const captureTimeoutMs = 8000;
 const monitorFrameMaxSize = throwDetectionThresholds.monitorMaxSize;
 const analysisFrameMaxSize = throwDetectionThresholds.analysisMaxSize;
+const persistentConfirmFrameCount = 3;
 
 export default function CameraLocalCountUpPlayScreen() {
   const router = useRouter();
@@ -90,6 +94,7 @@ export default function CameraLocalCountUpPlayScreen() {
   const [monitorError, setMonitorError] = useState<{ code: string; message: string } | null>(null);
   const [motionSeen, setMotionSeen] = useState(false);
   const [persistentChangeSeen, setPersistentChangeSeen] = useState(false);
+  const [baselineNoise, setBaselineNoise] = useState<BaselineNoiseProfile | null>(null);
   const [lastTransitionReason, setLastTransitionReason] = useState('initializing');
   const baselineFrameRef = useRef<CameraAnalysisFrame | null>(null);
   const baselineMonitorFrameRef = useRef<CameraAnalysisFrame | null>(null);
@@ -103,6 +108,9 @@ export default function CameraLocalCountUpPlayScreen() {
   const stableStartedAtRef = useRef<number | null>(null);
   const motionSeenSinceBaselineRef = useRef(false);
   const persistentChangeSeenRef = useRef(false);
+  const persistentCandidateCountRef = useRef(0);
+  const persistentBoundingBoxRef = useRef<MotionAnalysis['boundingBox'] | null>(null);
+  const baselineNoiseRef = useRef<BaselineNoiseProfile | null>(null);
   const baselineRetryCountRef = useRef(0);
   const baselineRetryBlockedUntilRef = useRef(0);
   const capturePictureRef = useRef(cameraSession.capturePicture);
@@ -172,6 +180,8 @@ export default function CameraLocalCountUpPlayScreen() {
     }
     motionSeenSinceBaselineRef.current = false;
     persistentChangeSeenRef.current = false;
+    persistentCandidateCountRef.current = 0;
+    persistentBoundingBoxRef.current = null;
     stableStartedAtRef.current = null;
     setMotionSeen(false);
     setPersistentChangeSeen(false);
@@ -187,8 +197,10 @@ export default function CameraLocalCountUpPlayScreen() {
       previousFrameRef.current = null;
       lastStableFrameRef.current = null;
       pendingThrownFrameRef.current = null;
+      baselineNoiseRef.current = null;
       setBaselineFrameId(null);
       resetThrowDetectionRefs(null);
+      setBaselineNoise(null);
       setCandidateOptions([]);
       setCandidateMessage(message);
       setDetectionState('paused');
@@ -267,8 +279,19 @@ export default function CameraLocalCountUpPlayScreen() {
       }
 
       if (options?.manual) {
+        stopMonitorLoop();
+        baselineFrameRef.current = null;
+        baselineMonitorFrameRef.current = null;
+        previousFrameRef.current = null;
+        lastStableFrameRef.current = null;
+        pendingThrownFrameRef.current = null;
+        baselineNoiseRef.current = null;
+        persistentCandidateCountRef.current = 0;
+        persistentBoundingBoxRef.current = null;
         baselineRetryCountRef.current = 0;
         baselineRetryBlockedUntilRef.current = 0;
+        setBaselineNoise(null);
+        setCandidateOptions([]);
         setAutoMonitorEnabled(autoDetection);
         setMonitorError(null);
       } else if (Date.now() < baselineRetryBlockedUntilRef.current) {
@@ -316,23 +339,30 @@ export default function CameraLocalCountUpPlayScreen() {
       setCandidateMessage('基準画像を取得中です。');
       try {
         logMonitor('capture start', { kind: 'baseline' });
-        const frame = await captureFrameWithTimeout(frameSource, {
-          maxSize: analysisFrameMaxSize,
+        const { baselineFrame, noiseProfile } = await captureStableBaseline({
+          frameSource,
+          calibration: calibrationEditor.profile,
         });
-        logMonitor('capture end', { kind: 'baseline', frameId: frame.frameId });
+        logMonitor('capture end', {
+          kind: 'baseline',
+          frameId: baselineFrame.frameId,
+          noise: noiseProfile,
+        });
         if (!mountedRef.current) {
           return;
         }
-        baselineFrameRef.current = frame;
+        baselineFrameRef.current = baselineFrame;
+        baselineNoiseRef.current = noiseProfile;
         pendingThrownFrameRef.current = null;
-        resetThrowDetectionRefs(frame);
+        resetThrowDetectionRefs(baselineFrame);
         baselineRetryCountRef.current = 0;
         baselineRetryBlockedUntilRef.current = 0;
-        setBaselineFrameId(frame.frameId);
+        setBaselineFrameId(baselineFrame.frameId);
+        setBaselineNoise(noiseProfile);
         setCandidateOptions([]);
         setLastProcessingMs(null);
         setMonitorError(null);
-        setLastTransitionReason('baseline captured');
+        setLastTransitionReason('median baseline captured');
         setDetectionState('waiting_throw');
         setCandidateMessage('基準画像を取得しました。投擲待機中です。');
       } catch (error) {
@@ -351,17 +381,28 @@ export default function CameraLocalCountUpPlayScreen() {
           if (nextRetryCount >= baselineRetryLimit) {
             setAutoMonitorEnabled(false);
             setCandidateMessage(
-              `基準画像を取得できませんでした（${monitorCaptureError.code}）。基準画像を再取得してください。`,
+              monitorCaptureError.code === 'BASELINE_UNSTABLE'
+                ? '照明またはカメラが安定していません。基準画像を再取得してください。'
+                : `基準画像を取得できませんでした（${monitorCaptureError.code}）。基準画像を再取得してください。`,
             );
           } else {
             setCandidateMessage(
-              `基準画像を取得できませんでした（${monitorCaptureError.code}）。少し待って再試行します。`,
+              monitorCaptureError.code === 'BASELINE_UNSTABLE'
+                ? '盤面または照明が安定していません。少し待って再試行します。'
+                : `基準画像を取得できませんでした（${monitorCaptureError.code}）。少し待って再試行します。`,
             );
           }
         }
       }
     },
-    [autoDetection, calibrationEditor.status, cameraReady, resetThrowDetectionRefs],
+    [
+      autoDetection,
+      calibrationEditor.profile,
+      calibrationEditor.status,
+      cameraReady,
+      resetThrowDetectionRefs,
+      stopMonitorLoop,
+    ],
   );
 
   const detectThrow = useCallback(
@@ -555,12 +596,10 @@ export default function CameraLocalCountUpPlayScreen() {
           baselineFrame: baselineMonitorFrameRef.current,
           currentFrame,
           calibration: calibrationEditor.profile,
+          baselineNoise: baselineNoiseRef.current,
         });
         setTemporalAnalysis(temporal);
         setPersistentAnalysis(persistent);
-        persistentChangeSeenRef.current =
-          persistentChangeSeenRef.current || persistent.hasPersistentChange;
-        setPersistentChangeSeen(persistentChangeSeenRef.current);
 
         if (
           temporal.reason === 'frame_size_mismatch' ||
@@ -577,7 +616,11 @@ export default function CameraLocalCountUpPlayScreen() {
 
         if (temporal.reason === 'obstruction') {
           motionSeenSinceBaselineRef.current = true;
+          persistentCandidateCountRef.current = 0;
+          persistentBoundingBoxRef.current = null;
+          persistentChangeSeenRef.current = false;
           setMotionSeen(true);
+          setPersistentChangeSeen(false);
           setDetectionState('waiting_stable');
           setLastTransitionReason('obstruction');
           stableStartedAtRef.current = null;
@@ -591,7 +634,11 @@ export default function CameraLocalCountUpPlayScreen() {
 
         if (temporal.reason === 'motion') {
           motionSeenSinceBaselineRef.current = true;
+          persistentCandidateCountRef.current = 0;
+          persistentBoundingBoxRef.current = null;
+          persistentChangeSeenRef.current = false;
           setMotionSeen(true);
+          setPersistentChangeSeen(false);
           setDetectionState('motion_detected');
           setLastTransitionReason('temporal motion');
           stableStartedAtRef.current = null;
@@ -602,6 +649,10 @@ export default function CameraLocalCountUpPlayScreen() {
         }
 
         if (!motionSeenSinceBaselineRef.current) {
+          persistentCandidateCountRef.current = 0;
+          persistentBoundingBoxRef.current = null;
+          persistentChangeSeenRef.current = false;
+          setPersistentChangeSeen(false);
           stableStartedAtRef.current = null;
           setStableStartedAt(null);
           previousFrameRef.current = currentFrame;
@@ -613,6 +664,23 @@ export default function CameraLocalCountUpPlayScreen() {
         }
 
         if (temporal.reason === 'stable') {
+          if (persistent.hasPersistentChange) {
+            const overlapsPrevious = boundingBoxesOverlap(
+              persistentBoundingBoxRef.current,
+              persistent.boundingBox,
+            );
+            persistentCandidateCountRef.current = overlapsPrevious
+              ? persistentCandidateCountRef.current + 1
+              : 1;
+            persistentBoundingBoxRef.current = persistent.boundingBox;
+          } else {
+            persistentCandidateCountRef.current = 0;
+            persistentBoundingBoxRef.current = null;
+          }
+          persistentChangeSeenRef.current =
+            persistentCandidateCountRef.current >= persistentConfirmFrameCount;
+          setPersistentChangeSeen(persistentChangeSeenRef.current);
+
           const now = Date.now();
           const startedAt = stableStartedAtRef.current ?? now;
           stableStartedAtRef.current = startedAt;
@@ -640,6 +708,8 @@ export default function CameraLocalCountUpPlayScreen() {
 
             motionSeenSinceBaselineRef.current = false;
             persistentChangeSeenRef.current = false;
+            persistentCandidateCountRef.current = 0;
+            persistentBoundingBoxRef.current = null;
             setMotionSeen(false);
             setPersistentChangeSeen(false);
             stableStartedAtRef.current = null;
@@ -939,7 +1009,7 @@ export default function CameraLocalCountUpPlayScreen() {
                 }
               />
               <InfoRow
-                label="盤面差分"
+                label="瞬間盤面差分"
                 value={
                   persistentAnalysis
                     ? `${(persistentAnalysis.changedPixelRatio * 100).toFixed(1)}%`
@@ -947,7 +1017,21 @@ export default function CameraLocalCountUpPlayScreen() {
                 }
               />
               <InfoRow label="motion seen" value={motionSeen ? 'yes' : 'no'} />
-              <InfoRow label="persistent change" value={persistentChangeSeen ? 'yes' : 'no'} />
+              <InfoRow label="投擲後差分確定" value={persistentChangeSeen ? 'yes' : 'no'} />
+              <InfoRow
+                label="baseline noise"
+                value={
+                  baselineNoise ? `${(baselineNoise.baselineNoiseRatio * 100).toFixed(1)}%` : '-'
+                }
+              />
+              <InfoRow
+                label="baseline quality"
+                value={baselineNoise ? baselineNoise.baselineQuality : '-'}
+              />
+              <InfoRow
+                label="noise p95"
+                value={baselineNoise ? String(baselineNoise.pixelDeltaP95) : '-'}
+              />
               <InfoRow
                 label="temporal pixels"
                 value={temporalAnalysis ? String(temporalAnalysis.changedPixelCount) : '-'}
@@ -1191,6 +1275,71 @@ async function captureFrameWithTimeout(
   }
 }
 
+async function captureStableBaseline(input: {
+  frameSource: CameraFrameSource;
+  calibration: Parameters<typeof measureBaselineNoise>[0]['calibration'];
+}) {
+  const sampleFrames: CameraAnalysisFrame[] = [];
+
+  for (let index = 0; index < throwDetectionThresholds.baselineWarmupCount; index += 1) {
+    await captureFrameWithTimeout(input.frameSource, { maxSize: analysisFrameMaxSize });
+    await sleep(throwDetectionThresholds.baselineFrameIntervalMs);
+  }
+
+  for (let index = 0; index < throwDetectionThresholds.baselineSampleCount; index += 1) {
+    sampleFrames.push(
+      await captureFrameWithTimeout(input.frameSource, { maxSize: analysisFrameMaxSize }),
+    );
+    if (index < throwDetectionThresholds.baselineSampleCount - 1) {
+      await sleep(throwDetectionThresholds.baselineFrameIntervalMs);
+    }
+  }
+
+  const monitorFrames = sampleFrames.map((frame) =>
+    resizeAnalysisFrame(frame, monitorFrameMaxSize),
+  );
+  const noiseProfile = measureBaselineNoise({
+    frames: monitorFrames,
+    calibration: input.calibration,
+  });
+  if (noiseProfile.baselineQuality !== 'good') {
+    throw new Error('BASELINE_UNSTABLE');
+  }
+
+  return {
+    baselineFrame: createMedianBaselineFrame(sampleFrames, {
+      frameId: `baseline-median-${Date.now().toString(36)}`,
+      capturedAt: new Date().toISOString(),
+    }),
+    noiseProfile,
+  };
+}
+
+function boundingBoxesOverlap(
+  first: MotionAnalysis['boundingBox'] | null,
+  second: MotionAnalysis['boundingBox'] | null,
+) {
+  if (!first || !second) {
+    return Boolean(first) === Boolean(second);
+  }
+
+  const left = Math.max(first.x, second.x);
+  const top = Math.max(first.y, second.y);
+  const right = Math.min(first.x + first.width, second.x + second.width);
+  const bottom = Math.min(first.y + first.height, second.y + second.height);
+  if (right <= left || bottom <= top) {
+    return false;
+  }
+
+  const intersection = (right - left) * (bottom - top);
+  const smallerArea = Math.min(first.width * first.height, second.width * second.height);
+  return smallerArea === 0 ? false : intersection / smallerArea >= 0.35;
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function toMonitorError(error: unknown) {
   const rawCode =
     error instanceof Error && error.message.trim().length > 0
@@ -1226,6 +1375,8 @@ function getMonitorErrorMessage(code: string) {
       return 'カメラフレーム取得処理を初期化できませんでした。';
     case 'CONCURRENT_CAPTURE_BLOCKED':
       return '前の撮影処理が完了するまで待機してください。';
+    case 'BASELINE_UNSTABLE':
+      return '照明またはカメラが安定していません。';
     default:
       return '自動判定を完了できませんでした。手動入力で続行できます。';
   }

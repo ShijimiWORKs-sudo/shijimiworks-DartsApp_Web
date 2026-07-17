@@ -146,6 +146,53 @@ test('camera COUNT-UP monitor requires temporal motion before persistent throw a
   assert.match(processMonitorFrameBlock, /detectThrow\(\{ thrownFrame: analysisFrame \}\)/);
 });
 
+test('camera COUNT-UP baseline capture uses warm-up multi-frame median and noise floor', () => {
+  const play = readRepoFile('app/camera/local-count-up/[gameId]/index.tsx');
+
+  assert.match(play, /captureStableBaseline/);
+  assert.match(play, /baselineWarmupCount/);
+  assert.match(play, /baselineSampleCount/);
+  assert.match(play, /createMedianBaselineFrame/);
+  assert.match(play, /measureBaselineNoise/);
+  assert.match(play, /BASELINE_UNSTABLE/);
+  assert.match(play, /baselineNoiseRef/);
+  assert.match(play, /baseline quality/);
+  assert.match(play, /baseline noise/);
+});
+
+test('camera COUNT-UP does not latch persistent change before motion and confirms it continuously', () => {
+  const play = readRepoFile('app/camera/local-count-up/[gameId]/index.tsx');
+  const processMonitorFrameBlock = extractConstBlock(play, 'processMonitorFrame');
+
+  assert.match(play, /persistentCandidateCountRef/);
+  assert.match(play, /persistentBoundingBoxRef/);
+  assert.match(play, /persistentConfirmFrameCount = 3/);
+  assert.match(processMonitorFrameBlock, /!motionSeenSinceBaselineRef\.current/);
+  assert.match(processMonitorFrameBlock, /persistentChangeSeenRef\.current = false/);
+  assert.match(
+    processMonitorFrameBlock,
+    /persistentCandidateCountRef\.current >= persistentConfirmFrameCount/,
+  );
+  assert.match(processMonitorFrameBlock, /boundingBoxesOverlap/);
+  assert.match(play, /投擲後差分確定/);
+  assert.match(play, /瞬間盤面差分/);
+});
+
+test('camera COUNT-UP baseline recapture resets stale persistent state', () => {
+  const play = readRepoFile('app/camera/local-count-up/[gameId]/index.tsx');
+  const captureBaselineBlock = extractConstBlock(play, 'captureBaseline');
+  const resetBlock = extractConstBlock(play, 'resetThrowDetectionRefs');
+
+  assert.match(captureBaselineBlock, /baselineFrameRef\.current = null/);
+  assert.match(captureBaselineBlock, /baselineMonitorFrameRef\.current = null/);
+  assert.match(captureBaselineBlock, /previousFrameRef\.current = null/);
+  assert.match(captureBaselineBlock, /lastStableFrameRef\.current = null/);
+  assert.match(captureBaselineBlock, /pendingThrownFrameRef\.current = null/);
+  assert.match(captureBaselineBlock, /baselineNoiseRef\.current = null/);
+  assert.match(resetBlock, /persistentCandidateCountRef\.current = 0/);
+  assert.match(resetBlock, /persistentBoundingBoxRef\.current = null/);
+});
+
 test('camera COUNT-UP monitor uses two stage resolution and treats no significant change as nonfatal', () => {
   const play = readRepoFile('app/camera/local-count-up/[gameId]/index.tsx');
 

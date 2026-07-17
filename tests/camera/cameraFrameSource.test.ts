@@ -5,6 +5,8 @@ import {
   analyzePersistentBoardDifference,
   analyzeFrameMotion,
   analyzeTemporalMotion,
+  createMedianBaselineFrame,
+  measureBaselineNoise,
   resizeAnalysisFrame,
   throwDetectionThresholds,
   type CameraAnalysisFrame,
@@ -113,6 +115,37 @@ test('temporal and persistent analysis are separated for throw detection', () =>
   assert.equal(stuckTemporal.reason, 'stable');
   assert.equal(stuckPersistent.hasPersistentChange, true);
   assert.ok(stuckPersistent.largestComponentPixels >= 3);
+});
+
+test('multi-frame baseline uses median pixels and measures baseline noise', () => {
+  const profile = createDefaultCalibrationProfile();
+  const frameA = createFrame('a', 20, 20, 100);
+  const frameB = createFrame('b', 20, 20, 102);
+  const frameC = createFrame('c', 20, 20, 250);
+  frameA.grayPixels[10] = 80;
+  frameB.grayPixels[10] = 82;
+  frameC.grayPixels[10] = 240;
+
+  const baseline = createMedianBaselineFrame([frameA, frameB, frameC], {
+    frameId: 'median',
+    capturedAt: '2026-07-17T01:00:00.000Z',
+  });
+  assert.equal(baseline.frameId, 'median');
+  assert.equal(baseline.grayPixels[0], 102);
+  assert.equal(baseline.grayPixels[10], 82);
+
+  const quietNoise = measureBaselineNoise({
+    frames: [frameA, frameB, createFrame('d', 20, 20, 101)],
+    calibration: profile,
+  });
+  assert.equal(quietNoise.baselineQuality, 'good');
+  assert.ok(quietNoise.measuredPixelThreshold >= 28);
+
+  const unstableNoise = measureBaselineNoise({
+    frames: [createFrame('dark', 20, 20, 20), createFrame('bright', 20, 20, 230)],
+    calibration: profile,
+  });
+  assert.equal(unstableNoise.baselineQuality, 'unstable');
 });
 
 test('resizeAnalysisFrame supports high resolution final analysis and monitor resolution', () => {

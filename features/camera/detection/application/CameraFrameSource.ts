@@ -52,6 +52,15 @@ export type MotionAnalysis = {
   reason: 'idle' | 'motion' | 'stable' | 'obstruction' | 'frame_size_mismatch';
 };
 
+export type BaselineNoiseProfile = {
+  baselineNoiseRatio: number;
+  baselineNoisePixelCount: number;
+  pixelDeltaP95: number;
+  brightnessVariance: number;
+  baselineQuality: 'good' | 'unstable';
+  measuredPixelThreshold: number;
+};
+
 export const throwDetectionThresholds = {
   temporalMotionStartRatio: 0.01,
   temporalStableRatio: 0.003,
@@ -62,6 +71,13 @@ export const throwDetectionThresholds = {
   stableDurationMs: 650,
   frameIntervalMs: 180,
   pixelThreshold: 28,
+  baselineSampleCount: 5,
+  baselineWarmupCount: 2,
+  baselineFrameIntervalMs: 250,
+  baselineMaxRetryCount: 3,
+  baselineNoiseMaxRatio: 0.025,
+  baselineBrightnessVarianceMax: 450,
+  baselineNoiseThresholdMargin: 14,
   monitorMaxSize: 160,
   analysisMaxSize: 320,
   persistentRoiRadiusMultiplier: 1.1,
@@ -116,13 +132,22 @@ export function analyzePersistentBoardDifference(input: {
   currentFrame: CameraAnalysisFrame;
   calibration: BoardCalibrationProfile;
   pixelThreshold?: number;
+  baselineNoise?: BaselineNoiseProfile | null;
   roiRadiusMultiplier?: number;
 }): MotionAnalysis {
+  const pixelThreshold =
+    input.pixelThreshold ??
+    (input.baselineNoise
+      ? Math.max(
+          throwDetectionThresholds.pixelThreshold,
+          input.baselineNoise.measuredPixelThreshold,
+        )
+      : throwDetectionThresholds.pixelThreshold);
   const analysis = analyzeFrameDifference({
     referenceFrame: input.baselineFrame,
     currentFrame: input.currentFrame,
     calibration: input.calibration,
-    pixelThreshold: input.pixelThreshold,
+    pixelThreshold,
     roiRadiusMultiplier:
       input.roiRadiusMultiplier ?? throwDetectionThresholds.persistentRoiRadiusMultiplier,
   });
@@ -134,12 +159,116 @@ export function analyzePersistentBoardDifference(input: {
     analysis.changedPixelCount >= throwDetectionThresholds.persistentChangeMinPixels &&
     (analysis.changedPixelRatio >= throwDetectionThresholds.persistentChangeMinRatio ||
       analysis.largestComponentPixels >= throwDetectionThresholds.persistentComponentMinPixels ||
-      analysis.maxDelta >= (input.pixelThreshold ?? throwDetectionThresholds.pixelThreshold));
+      analysis.maxDelta >= pixelThreshold);
 
   return {
     ...analysis,
     hasPersistentChange,
     reason: hasPersistentChange ? 'motion' : 'stable',
+  };
+}
+
+export function createMedianBaselineFrame(
+  frames: CameraAnalysisFrame[],
+  input?: { frameId?: string; capturedAt?: string },
+): CameraAnalysisFrame {
+  if (frames.length === 0) {
+    throw new Error('BASELINE_FRAME_SERIES_EMPTY');
+  }
+
+  const [first] = frames;
+  if (
+    frames.some(
+      (frame) =>
+        frame.width !== first.width ||
+        frame.height !== first.height ||
+        frame.grayPixels.length !== first.grayPixels.length,
+    )
+  ) {
+    throw new Error('BASELINE_FRAME_SIZE_MISMATCH');
+  }
+
+  const grayPixels = new Uint8Array(first.grayPixels.length);
+  const samples = new Array<number>(frames.length);
+  for (let index = 0; index < grayPixels.length; index += 1) {
+    for (let frameIndex = 0; frameIndex < frames.length; frameIndex += 1) {
+      samples[frameIndex] = frames[frameIndex].grayPixels[index];
+    }
+    samples.sort((a, b) => a - b);
+    grayPixels[index] = samples[Math.floor(samples.length / 2)];
+  }
+
+  return {
+    ...first,
+    frameId: input?.frameId ?? `median-${first.frameId}`,
+    capturedAt: input?.capturedAt ?? first.capturedAt,
+    grayPixels,
+  };
+}
+
+export function measureBaselineNoise(input: {
+  frames: CameraAnalysisFrame[];
+  calibration: BoardCalibrationProfile;
+  pixelThreshold?: number;
+}): BaselineNoiseProfile {
+  if (input.frames.length < 2) {
+    return {
+      baselineNoiseRatio: 1,
+      baselineNoisePixelCount: 0,
+      pixelDeltaP95: 255,
+      brightnessVariance: 0,
+      baselineQuality: 'unstable',
+      measuredPixelThreshold: 255,
+    };
+  }
+
+  const pixelThreshold = input.pixelThreshold ?? throwDetectionThresholds.pixelThreshold;
+  const ratios: number[] = [];
+  const changedPixels: number[] = [];
+  const deltas: number[] = [];
+  const brightnessMeans: number[] = [];
+
+  for (const frame of input.frames) {
+    brightnessMeans.push(getMeanBrightness(frame));
+  }
+
+  for (let index = 1; index < input.frames.length; index += 1) {
+    const previous = input.frames[index - 1];
+    const current = input.frames[index];
+    const difference = analyzeFrameDifference({
+      referenceFrame: previous,
+      currentFrame: current,
+      calibration: input.calibration,
+      pixelThreshold,
+      roiRadiusMultiplier: 1,
+    });
+    ratios.push(difference.changedPixelRatio);
+    changedPixels.push(difference.changedPixelCount);
+    collectFrameDeltas(previous, current, deltas);
+  }
+
+  deltas.sort((a, b) => a - b);
+  const baselineNoiseRatio = average(ratios);
+  const baselineNoisePixelCount = Math.round(average(changedPixels));
+  const pixelDeltaP95 = percentile(deltas, 0.95);
+  const brightnessVariance = variance(brightnessMeans);
+  const measuredPixelThreshold = Math.max(
+    pixelThreshold,
+    Math.ceil(pixelDeltaP95 + throwDetectionThresholds.baselineNoiseThresholdMargin),
+  );
+  const baselineQuality =
+    baselineNoiseRatio <= throwDetectionThresholds.baselineNoiseMaxRatio &&
+    brightnessVariance <= throwDetectionThresholds.baselineBrightnessVarianceMax
+      ? 'good'
+      : 'unstable';
+
+  return {
+    baselineNoiseRatio,
+    baselineNoisePixelCount,
+    pixelDeltaP95,
+    brightnessVariance,
+    baselineQuality,
+    measuredPixelThreshold,
   };
 }
 
@@ -295,6 +424,53 @@ function getLargestComponentPixels(mask: Uint8Array, width: number) {
   }
 
   return largest;
+}
+
+function collectFrameDeltas(
+  referenceFrame: CameraAnalysisFrame,
+  currentFrame: CameraAnalysisFrame,
+  output: number[],
+) {
+  const length = Math.min(referenceFrame.grayPixels.length, currentFrame.grayPixels.length);
+  for (let index = 0; index < length; index += 1) {
+    output.push(Math.abs(currentFrame.grayPixels[index] - referenceFrame.grayPixels[index]));
+  }
+}
+
+function getMeanBrightness(frame: CameraAnalysisFrame) {
+  if (frame.grayPixels.length === 0) {
+    return 0;
+  }
+
+  let total = 0;
+  for (const value of frame.grayPixels) {
+    total += value;
+  }
+  return total / frame.grayPixels.length;
+}
+
+function average(values: number[]) {
+  if (values.length === 0) {
+    return 0;
+  }
+  return values.reduce((total, value) => total + value, 0) / values.length;
+}
+
+function variance(values: number[]) {
+  if (values.length === 0) {
+    return 0;
+  }
+  const mean = average(values);
+  return average(values.map((value) => (value - mean) ** 2));
+}
+
+function percentile(values: number[], ratio: number) {
+  if (values.length === 0) {
+    return 0;
+  }
+
+  const index = Math.min(values.length - 1, Math.max(0, Math.floor((values.length - 1) * ratio)));
+  return values[index];
 }
 
 export function toGrayscaleFrame(frame: CameraAnalysisFrame) {
