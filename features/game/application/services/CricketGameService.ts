@@ -197,7 +197,7 @@ export class CricketGameService implements CricketGameServicePort {
   async loadGame(gameId: string): Promise<CricketGameState> {
     const row = await this.db.getFirstAsync<GameRow>(
       `SELECT
-         g.id, g.status, g.bull_rule, g.current_round_no, g.current_turn_sequence_no,
+         g.id, g.status, g.bull_rule, g.current_round_no, g.current_turn_sequence_no, g.started_at,
          gp.display_name_snapshot, gp.current_cricket_score
        FROM game_sessions g
        JOIN game_players gp ON gp.game_id = g.id
@@ -227,6 +227,7 @@ export class CricketGameService implements CricketGameServicePort {
       status: row.status,
       bullRule: row.bull_rule,
       playerName: row.display_name_snapshot,
+      startedAt: row.started_at,
       currentRoundNo: row.current_round_no,
       currentTurnId: currentTurn?.id ?? null,
       currentTurnMarks:
@@ -510,6 +511,7 @@ type GameRow = {
   bull_rule: BullRule;
   current_round_no: number;
   current_turn_sequence_no: number;
+  started_at: string | null;
   display_name_snapshot: string;
   current_cricket_score: number;
 };

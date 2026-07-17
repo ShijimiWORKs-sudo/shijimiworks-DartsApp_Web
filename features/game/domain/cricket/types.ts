@@ -92,6 +92,7 @@ export type CricketGameState = {
   gameId: string;
   status: GameStatus;
   playerName: string;
+  startedAt: string | null;
   bullRule: BullRule;
   currentRoundNo: number;
   currentTurnId: string | null;

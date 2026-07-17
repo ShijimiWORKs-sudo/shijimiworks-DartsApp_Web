@@ -193,6 +193,15 @@ test('Calibration UI exposes save reload mirror drag scale rotation and ring con
 
   assert.match(route, /Camera Calibration/);
   assert.match(control, /映像を左右反転/);
+  assert.match(control, /保存中\.\.\./);
+  assert.match(control, /保存しました/);
+  assert.match(control, /最終保存日時/);
+  assert.match(control, /Profile ID/);
+  assert.match(control, /saveErrorMessage/);
+  assert.match(
+    control,
+    /disabled=\{editor\.status === 'invalid' \|\| editor\.saveState === 'saving'\}/,
+  );
   assert.match(control, /center X/);
   assert.match(control, /outerRadius/);
   assert.match(control, /rotation/);
@@ -204,6 +213,22 @@ test('Calibration UI exposes save reload mirror drag scale rotation and ring con
   assert.match(overlay, /20方向回転/);
   assert.match(store, /AsyncStorage/);
   assert.match(store, /LOCAL_COUNT_UP_CALIBRATION_PROFILE_KEY/);
+});
+
+test('Calibration editor tracks save success failure and reload restoration', () => {
+  const editor = readRepoFile('features/camera/calibration/ui/useBoardCalibrationEditor.ts');
+  const control = readRepoFile('components/camera/CalibrationControlPanel.tsx');
+
+  assert.match(editor, /saveState/);
+  assert.match(editor, /lastSavedAt/);
+  assert.match(editor, /saveErrorMessage/);
+  assert.match(editor, /savingRef/);
+  assert.match(editor, /setSaveState\('saving'\)/);
+  assert.match(editor, /setSaveState\('saved'\)/);
+  assert.match(editor, /setSaveState\('error'\)/);
+  assert.match(editor, /setLastSavedAt\(saved\.updatedAt\)/);
+  assert.match(editor, /setLastSavedAt\(loaded\.updatedAt\)/);
+  assert.match(control, /formatSavedAt\(editor\.lastSavedAt\)/);
 });
 
 function readRepoFile(relativePath: string) {

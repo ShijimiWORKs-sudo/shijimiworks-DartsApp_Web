@@ -165,7 +165,7 @@ export class CountUpGameService {
 
   async loadGame(gameId: string): Promise<CountUpGameState> {
     const game = await this.db.getFirstAsync<GameRow>(
-      `SELECT id, status, bull_rule, current_round_no, current_turn_sequence_no
+      `SELECT id, status, bull_rule, current_round_no, current_turn_sequence_no, started_at
        FROM game_sessions
        WHERE id = ? AND mode = ? AND deleted_at IS NULL
        LIMIT 1`,
@@ -217,6 +217,7 @@ export class CountUpGameService {
       status: game.status,
       bullRule: game.bull_rule,
       playerName: player.display_name_snapshot,
+      startedAt: game.started_at,
       currentRoundNo: game.current_round_no,
       currentTurnId: currentTurn?.id ?? null,
       currentTurnScore,
@@ -565,6 +566,7 @@ type GameRow = {
   bull_rule: BullRule;
   current_round_no: number;
   current_turn_sequence_no: number;
+  started_at: string | null;
 };
 
 type GamePlayerRow = {

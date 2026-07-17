@@ -24,6 +24,9 @@ export type BoardCalibrationEditorApi = {
   savedProfile: BoardCalibrationProfile;
   selectedRing: CalibrationRingKey;
   status: CalibrationStatus;
+  saveState: 'idle' | 'saving' | 'saved' | 'error';
+  lastSavedAt: string | null;
+  saveErrorMessage: string | null;
   dirty: boolean;
   invalidReasons: string[];
   setSelectedRing: (ring: CalibrationRingKey) => void;
@@ -52,7 +55,11 @@ export function useBoardCalibrationEditor(): BoardCalibrationEditorApi {
   const [profile, setProfile] = useState(() => createDefaultCalibrationProfile());
   const [savedProfile, setSavedProfile] = useState(profile);
   const [selectedRing, setSelectedRing] = useState<CalibrationRingKey>('outer');
+  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
+  const [saveErrorMessage, setSaveErrorMessage] = useState<string | null>(null);
   const historyRef = useRef<BoardCalibrationProfile[]>([]);
+  const savingRef = useRef(false);
 
   const validation = useMemo(() => validateCalibrationProfile(profile), [profile]);
   const dirty = JSON.stringify(profile) !== JSON.stringify(savedProfile);
@@ -63,6 +70,8 @@ export function useBoardCalibrationEditor(): BoardCalibrationEditorApi {
       historyRef.current.push(current);
       return clampCalibrationProfile(nextProfile);
     });
+    setSaveState('idle');
+    setSaveErrorMessage(null);
   }, []);
 
   const reload = useCallback(async () => {
@@ -70,6 +79,9 @@ export function useBoardCalibrationEditor(): BoardCalibrationEditorApi {
     historyRef.current = [];
     setProfile(loaded);
     setSavedProfile(loaded);
+    setSaveState('saved');
+    setLastSavedAt(loaded.updatedAt);
+    setSaveErrorMessage(null);
   }, []);
 
   useEffect(() => {
@@ -77,14 +89,38 @@ export function useBoardCalibrationEditor(): BoardCalibrationEditorApi {
   }, [reload]);
 
   const save = useCallback(async () => {
+    if (savingRef.current) {
+      return;
+    }
+
     const saveValidation = validateCalibrationProfile(profile);
     if (!saveValidation.valid) {
+      const message = `Calibrationを保存できません: ${saveValidation.reasons.join(', ')}`;
+      setSaveState('error');
+      setSaveErrorMessage(message);
       throw new Error(`INVALID_CALIBRATION:${saveValidation.reasons.join(',')}`);
     }
-    const saved = await saveBoardCalibrationProfile(profile);
-    historyRef.current = [];
-    setProfile(saved);
-    setSavedProfile(saved);
+
+    savingRef.current = true;
+    setSaveState('saving');
+    setSaveErrorMessage(null);
+    try {
+      const saved = await saveBoardCalibrationProfile(profile);
+      historyRef.current = [];
+      setProfile(saved);
+      setSavedProfile(saved);
+      setLastSavedAt(saved.updatedAt);
+      setSaveState('saved');
+    } catch (error) {
+      console.warn('Board calibration save failed', error);
+      setSaveState('error');
+      setSaveErrorMessage(
+        'Calibrationを保存できませんでした。少し待ってからもう一度お試しください。',
+      );
+      throw error;
+    } finally {
+      savingRef.current = false;
+    }
   }, [profile]);
 
   const setPreviewMirrored = useCallback(
@@ -219,6 +255,9 @@ export function useBoardCalibrationEditor(): BoardCalibrationEditorApi {
     savedProfile,
     selectedRing,
     status,
+    saveState,
+    lastSavedAt,
+    saveErrorMessage,
     dirty,
     invalidReasons: validation.reasons,
     setSelectedRing: (ring) => {

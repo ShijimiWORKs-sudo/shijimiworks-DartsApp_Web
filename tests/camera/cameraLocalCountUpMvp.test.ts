@@ -82,6 +82,50 @@ test('camera COUNT-UP routes expose playable MVP controls without WebSocket depe
   assert.doesNotMatch(play, /useLanCameraPeer|WebSocket|pairingCode/);
 });
 
+test('camera COUNT-UP settings resolve active sessions from the screen', () => {
+  const settings = readRepoFile('app/camera/local-count-up/settings.tsx');
+
+  assert.match(settings, /services\.activeSession\.findActiveSession\(\)/);
+  assert.match(settings, /buildCameraActiveSessionSummary/);
+  assert.match(settings, /modeLabel: isCameraCountUp \? 'カメラCOUNT-UP' : 'COUNT-UP'/);
+  assert.match(
+    settings,
+    /resumeRoute: isCameraCountUp \? `\/camera\/local-count-up\/\$\{game\.gameId\}` : session\.route/,
+  );
+  assert.match(settings, /modeLabel: '01 GAME'/);
+  assert.match(settings, /modeLabel: 'STANDARD CRICKET'/);
+  assert.match(settings, /modeLabel: 'MATCH'/);
+  assert.match(settings, /進行中ゲームを再開/);
+  assert.match(settings, /進行中ゲームを終了/);
+  assert.match(settings, /ゲームハブを開く/);
+  assert.match(settings, /router\.replace\('\/game'\)/);
+});
+
+test('camera COUNT-UP active session abort is confirmed and does not auto-delete DB rows', () => {
+  const settings = readRepoFile('app/camera/local-count-up/settings.tsx');
+
+  assert.match(settings, /<Modal/);
+  assert.match(settings, /確定するまでDBのstatusは変更しません/);
+  assert.match(
+    settings,
+    /await services\.activeSession\.abortActiveSession\(activeSessionSummary\.session\)/,
+  );
+  assert.match(settings, /setActiveSessionSummary\(null\)/);
+  assert.doesNotMatch(settings, /DELETE FROM|deleteGame|removeGame/);
+  assert.doesNotMatch(settings, /await startGame\(\)/);
+});
+
+test('camera COUNT-UP start remains available only after active session is cleared', () => {
+  const settings = readRepoFile('app/camera/local-count-up/settings.tsx');
+
+  assert.match(
+    settings,
+    /disabled=\{!isAvailable \|\| isStarting \|\| activeSessionSummary !== null\}/,
+  );
+  assert.match(settings, /setActiveSessionSummary\(null\)/);
+  assert.match(settings, /COUNT-UP開始/);
+});
+
 function createCandidate() {
   return new DetectionEngine().createCandidate({
     sessionId: 'local-count-up',

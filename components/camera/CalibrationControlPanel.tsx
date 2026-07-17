@@ -25,8 +25,9 @@ export function CalibrationControlPanel({ editor }: CalibrationControlPanelProps
 
   return (
     <View testID="calibration-control-panel">
-      <InfoRow label="状態" value={formatStatus(editor.status, editor.dirty)} />
+      <InfoRow label="状態" value={formatStatus(editor.status, editor.dirty, editor.saveState)} />
       <InfoRow label="Profile ID" value={profile.profileId} />
+      <InfoRow label="最終保存日時" value={formatSavedAt(editor.lastSavedAt)} />
       <InfoRow label="Projection" value={profile.projectionMode} />
       <InfoRow label="左右反転" value={profile.previewMirrored ? 'ON' : 'OFF'} />
       <View style={styles.actionGrid}>
@@ -36,9 +37,9 @@ export function CalibrationControlPanel({ editor }: CalibrationControlPanelProps
           variant="secondary"
         />
         <AppButton
-          label="保存"
+          label={editor.saveState === 'saving' ? '保存中...' : '保存'}
           onPress={() => void editor.save()}
-          disabled={editor.status === 'invalid'}
+          disabled={editor.status === 'invalid' || editor.saveState === 'saving'}
         />
         <AppButton label="調整前へ戻す" onPress={editor.undoChange} variant="secondary" />
         <AppButton label="前回保存値へ戻す" onPress={editor.revertToSaved} variant="secondary" />
@@ -109,6 +110,12 @@ export function CalibrationControlPanel({ editor }: CalibrationControlPanelProps
 
       {editor.invalidReasons.length > 0 ? (
         <Text style={styles.error}>Calibration無効: {editor.invalidReasons.join(', ')}</Text>
+      ) : editor.saveState === 'saved' ? (
+        <Text style={styles.valid}>保存しました。Calibrationは自動判定へ利用できます。</Text>
+      ) : editor.saveState === 'error' ? (
+        <Text style={styles.error}>
+          {editor.saveErrorMessage ?? 'Calibrationを保存できませんでした。'}
+        </Text>
       ) : (
         <Text style={styles.valid}>Calibration有効 / 保存すると自動判定へ利用できます。</Text>
       )}
@@ -156,7 +163,13 @@ function RingValueRow({ label, value }: { label: string; value: number }) {
   return <InfoRow label={label} value={value.toFixed(3)} />;
 }
 
-function formatStatus(status: string, dirty: boolean) {
+function formatStatus(status: string, dirty: boolean, saveState: string) {
+  if (saveState === 'saving') {
+    return '保存中...';
+  }
+  if (saveState === 'error') {
+    return '保存失敗';
+  }
   if (status === 'saved') {
     return '保存済み';
   }
@@ -167,6 +180,14 @@ function formatStatus(status: string, dirty: boolean) {
     return '未設定';
   }
   return 'Calibration無効';
+}
+
+function formatSavedAt(lastSavedAt: string | null) {
+  if (!lastSavedAt) {
+    return '-';
+  }
+
+  return new Date(lastSavedAt).toLocaleString('ja-JP');
 }
 
 const styles = StyleSheet.create({
