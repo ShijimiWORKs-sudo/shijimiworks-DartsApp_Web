@@ -126,6 +126,79 @@ test('camera COUNT-UP automatic detection exposes state machine and loop control
   assert.match(play, /setTimeout\(tick, throwDetectionThresholds\.frameIntervalMs\)/);
 });
 
+test('camera COUNT-UP monitor lifecycle does not depend on capture in-progress state', () => {
+  const play = readRepoFile('app/camera/local-count-up/[gameId]/index.tsx');
+  const canAutoMonitorBlock = extractConstBlock(play, 'canAutoMonitor');
+  const monitorEffectBlock = extractUseEffectBlock(play, 'monitor generation');
+
+  assert.match(canAutoMonitorBlock, /cameraReady/);
+  assert.doesNotMatch(canAutoMonitorBlock, /canTakePicture|isCapturing/);
+  assert.match(monitorEffectBlock, /cameraReady/);
+  assert.doesNotMatch(monitorEffectBlock, /cameraSession\.canTakePicture|isCapturing/);
+  assert.match(play, /const cameraReady =/);
+});
+
+test('camera COUNT-UP monitor uses stable frame source and in-flight capture guard', () => {
+  const play = readRepoFile('app/camera/local-count-up/[gameId]/index.tsx');
+
+  assert.match(play, /capturePictureRef\.current = cameraSession\.capturePicture/);
+  assert.match(play, /frameSourceRef\.current = new WebCameraFrameSource/);
+  assert.match(play, /captureImage: \(\) => capturePictureRef\.current\(cameraRef\.current\)/);
+  assert.doesNotMatch(play, /new WebCameraFrameSource\(\{[\s\S]*\},\s*\[cameraSession\]/);
+  assert.match(play, /if \(monitorInFlightRef\.current \|\| !canAutoMonitor\)/);
+  assert.match(play, /finally \{\s*monitorInFlightRef\.current = false;/);
+  assert.doesNotMatch(play, /stopMonitorLoop[\s\S]{0,180}monitorInFlightRef\.current = false/);
+});
+
+test('camera COUNT-UP baseline retry backoff stops after three failures and can recover manually', () => {
+  const play = readRepoFile('app/camera/local-count-up/[gameId]/index.tsx');
+
+  assert.match(play, /const baselineRetryLimit = 3/);
+  assert.match(play, /const baselineRetryBackoffMs = 1000/);
+  assert.match(
+    play,
+    /baselineRetryBlockedUntilRef\.current = Date\.now\(\) \+ baselineRetryBackoffMs/,
+  );
+  assert.match(play, /nextRetryCount >= baselineRetryLimit/);
+  assert.match(play, /setAutoMonitorEnabled\(false\)/);
+  assert.match(play, /captureBaseline\(\{ manual: true \}\)/);
+  assert.match(play, /baselineRetryCountRef\.current = 0/);
+});
+
+test('camera COUNT-UP stable detection is ref based and candidate wait stops the loop', () => {
+  const play = readRepoFile('app/camera/local-count-up/[gameId]/index.tsx');
+  const processMonitorFrameBlock = extractConstBlock(play, 'processMonitorFrame');
+  const monitorEffectBlock = extractUseEffectBlock(play, 'monitor generation');
+
+  assert.match(play, /stableStartedAtRef/);
+  assert.match(processMonitorFrameBlock, /stableStartedAtRef\.current/);
+  assert.doesNotMatch(processMonitorFrameBlock, /stableStartedAt \?\?/);
+  assert.doesNotMatch(monitorEffectBlock, /stableStartedAt/);
+  assert.match(play, /candidateOptions\.length === 0/);
+  assert.match(play, /setDetectionState\('waiting_confirmation'\)/);
+  assert.match(play, /setDetectionState\('waiting_throw'\)/);
+});
+
+test('camera COUNT-UP monitor shows explicit error codes and dev audit logs', () => {
+  const play = readRepoFile('app/camera/local-count-up/[gameId]/index.tsx');
+
+  for (const code of [
+    'CAMERA_FRAME_UNAVAILABLE',
+    'CAMERA_FRAME_REQUIRES_WEB_BASE64',
+    'WEB_IMAGE_DECODE_FAILED',
+    'CAPTURE_TIMEOUT',
+    'CONCURRENT_CAPTURE_BLOCKED',
+  ]) {
+    assert.match(play, new RegExp(code));
+  }
+  assert.match(play, /<InfoRow label="エラー"/);
+  assert.match(play, /\[camera-count-up-monitor\]/);
+  assert.match(play, /monitor generation/);
+  assert.match(play, /capture start/);
+  assert.match(play, /capture end/);
+  assert.match(play, /baseline retry/);
+});
+
 test('camera COUNT-UP baseline updates only after candidate confirmation', () => {
   const play = readRepoFile('app/camera/local-count-up/[gameId]/index.tsx');
 
@@ -206,4 +279,20 @@ function createPort(calls: string[]): CandidateRouterPort {
 
 function readRepoFile(relativePath: string) {
   return readFileSync(path.join(root, relativePath), 'utf8');
+}
+
+function extractConstBlock(source: string, constName: string) {
+  const index = source.indexOf(`const ${constName}`);
+  assert.notEqual(index, -1, `missing const ${constName}`);
+  const nextConst = source.indexOf('\n  const ', index + 1);
+  return source.slice(index, nextConst === -1 ? source.length : nextConst);
+}
+
+function extractUseEffectBlock(source: string, marker: string) {
+  const markerIndex = source.indexOf(marker);
+  assert.notEqual(markerIndex, -1, `missing marker ${marker}`);
+  const start = source.lastIndexOf('useEffect(() =>', markerIndex);
+  assert.notEqual(start, -1, `missing useEffect for ${marker}`);
+  const end = source.indexOf('\n\n  const ', markerIndex);
+  return source.slice(start, end === -1 ? source.length : end);
 }
