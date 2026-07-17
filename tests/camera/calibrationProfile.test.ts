@@ -7,7 +7,10 @@ import {
   applyPreviewMirror,
   removePreviewMirror,
   scoreCanonicalPoint,
+  scoreCanonicalPointInViewport,
   scoreToApproximateBoardPoint,
+  scoreToApproximateBoardPointInViewport,
+  getCalibrationViewportTransform,
 } from '../../features/camera/calibration/domain/coordinateTransform';
 import {
   clampCalibrationProfile,
@@ -22,8 +25,56 @@ test('Calibration Profile default is valid and uses mirror OFF', () => {
   const profile = createDefaultCalibrationProfile(new Date('2026-07-17T00:00:00.000Z'));
 
   assert.equal(profile.version, 2);
+  assert.equal(profile.projectionMode, 'circle');
   assert.equal(profile.previewMirrored, false);
+  assert.equal(profile.outerRadius, 0.3);
   assert.equal(validateCalibrationProfile(profile).valid, true);
+});
+
+test('circle viewport transform keeps rings circular for 16:9, 4:3, 1:1 and resize', () => {
+  const profile = createDefaultCalibrationProfile();
+  for (const dimensions of [
+    { containerWidth: 1600, containerHeight: 900 },
+    { containerWidth: 1280, containerHeight: 960 },
+    { containerWidth: 720, containerHeight: 720 },
+    { containerWidth: 1920, containerHeight: 1080 },
+  ]) {
+    const transform = getCalibrationViewportTransform({ ...dimensions, profile });
+    assert.equal(
+      transform.baseSize,
+      Math.min(dimensions.containerWidth, dimensions.containerHeight),
+    );
+    const ringWidth = transform.outerRadiusPx * 2;
+    const ringHeight = transform.outerRadiusPx * 2;
+    assert.equal(ringWidth, ringHeight);
+  }
+});
+
+test('viewport transform maps center, mirror and board points round-trip', () => {
+  const profile = { ...createDefaultCalibrationProfile(), previewMirrored: false };
+  const transform = getCalibrationViewportTransform({
+    containerWidth: 1600,
+    containerHeight: 900,
+    profile,
+  });
+  assert.equal(transform.centerXPx, 800);
+  assert.equal(transform.centerYPx, 450);
+  assert.equal(transform.screenToCanonical({ x: 800, y: 450 }).x, profile.centerX);
+  assert.equal(transform.screenToCanonical({ x: 800, y: 450 }).y, profile.centerY);
+
+  const t20Screen = transform.boardToScreen({ x: 0, y: -0.58, radius: 0.58, angleDeg: 0 });
+  const t20Board = transform.screenToBoard(t20Screen);
+  assert.ok(Math.abs(t20Board.x) < 0.000001);
+  assert.ok(Math.abs(t20Board.y + 0.58) < 0.000001);
+
+  const mirrored = getCalibrationViewportTransform({
+    containerWidth: 1600,
+    containerHeight: 900,
+    profile: { ...profile, previewMirrored: true },
+  });
+  const mirroredCenter = mirrored.canonicalToScreen({ x: profile.centerX, y: profile.centerY });
+  assert.equal(mirroredCenter.x, 800);
+  assert.ok(Math.abs(mirrored.screenToCanonical({ x: 1120, y: 450 }).x - 0.3) < 0.000001);
 });
 
 test('Calibration Profile invalid ring order falls back to constrained order', () => {
@@ -87,6 +138,41 @@ test('score mapping handles center, T20, D16, S1 and rotation', () => {
     rotated,
   );
   assert.equal(rotatedT20.segmentNumber, 20);
+});
+
+test('viewport score mapping keeps overlay geometry and score geometry aligned', () => {
+  const profile = createDefaultCalibrationProfile();
+  const dimensions = { containerWidth: 1600, containerHeight: 900 };
+  const transform = getCalibrationViewportTransform({ ...dimensions, profile });
+  const t20 = scoreToApproximateBoardPointInViewport({
+    area: 'triple',
+    segmentNumber: 20,
+    profile,
+    ...dimensions,
+  });
+  const d16 = scoreToApproximateBoardPointInViewport({
+    area: 'double',
+    segmentNumber: 16,
+    profile,
+    ...dimensions,
+  });
+  const bull = scoreToApproximateBoardPointInViewport({
+    area: 'inner_bull',
+    segmentNumber: null,
+    profile,
+    ...dimensions,
+  });
+
+  assert.equal(scoreCanonicalPointInViewport(t20, profile, dimensions).score, 60);
+  assert.equal(scoreCanonicalPointInViewport(d16, profile, dimensions).score, 32);
+  assert.equal(scoreCanonicalPointInViewport(bull, profile, dimensions).area, 'inner_bull');
+
+  const t20Screen = transform.canonicalToScreen(t20);
+  const t20Board = transform.screenToBoard(t20Screen);
+  assert.ok(
+    Math.abs(t20Board.radius - (profile.tripleInnerRatio + profile.tripleOuterRatio) / 2) <
+      0.000001,
+  );
 });
 
 test('ring adjustment constrains order and keeps center stable', () => {

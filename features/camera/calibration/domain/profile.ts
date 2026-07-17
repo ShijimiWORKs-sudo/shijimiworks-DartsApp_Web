@@ -9,10 +9,11 @@ const minGap = 0.005;
 export const defaultCalibrationProfile: BoardCalibrationProfile = {
   version: 2,
   profileId: 'default-local-count-up-board',
+  projectionMode: 'circle',
   previewMirrored: false,
   centerX: 0.5,
   centerY: 0.5,
-  outerRadius: 0.32,
+  outerRadius: 0.3,
   rotationDeg: 0,
   doubleOuterRatio: 1,
   doubleInnerRatio: 0.9,
@@ -49,10 +50,13 @@ export function clampCalibrationProfile(
   now = new Date(),
 ): BoardCalibrationProfile {
   const base = createDefaultCalibrationProfile(now);
+  const projectionMode: BoardCalibrationProfile['projectionMode'] =
+    input?.projectionMode === 'perspective' ? 'perspective' : 'circle';
   const merged = {
     ...base,
     ...(input ?? {}),
     version: 2 as const,
+    projectionMode,
   };
   const centerX = clamp01(merged.centerX);
   const centerY = clamp01(merged.centerY);
@@ -78,6 +82,7 @@ export function clampCalibrationProfile(
     tripleOuterRatio: sorted.tripleOuterRatio,
     doubleInnerRatio: sorted.doubleInnerRatio,
     doubleOuterRatio: sorted.doubleOuterRatio,
+    projectionMode,
     previewMirrored: Boolean(merged.previewMirrored),
     updatedAt: now.toISOString(),
   };
@@ -95,6 +100,9 @@ export function validateCalibrationProfile(
   }
   if (!isInRange(profile.outerRadius, 0.12, 0.49)) {
     reasons.push('OUTER_RADIUS_OUT_OF_RANGE');
+  }
+  if (profile.projectionMode !== 'circle' && profile.projectionMode !== 'perspective') {
+    reasons.push('PROJECTION_MODE_INVALID');
   }
   if (!(
     0 < profile.innerBullRatio &&
@@ -139,6 +147,7 @@ export function ringToField(
   | 'version'
   | 'profileId'
   | 'cameraDeviceId'
+  | 'projectionMode'
   | 'previewMirrored'
   | 'centerX'
   | 'centerY'

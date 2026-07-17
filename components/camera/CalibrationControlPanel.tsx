@@ -27,6 +27,7 @@ export function CalibrationControlPanel({ editor }: CalibrationControlPanelProps
     <View testID="calibration-control-panel">
       <InfoRow label="状態" value={formatStatus(editor.status, editor.dirty)} />
       <InfoRow label="Profile ID" value={profile.profileId} />
+      <InfoRow label="Projection" value={profile.projectionMode} />
       <InfoRow label="左右反転" value={profile.previewMirrored ? 'ON' : 'OFF'} />
       <View style={styles.actionGrid}>
         <AppButton
@@ -34,7 +35,11 @@ export function CalibrationControlPanel({ editor }: CalibrationControlPanelProps
           onPress={() => editor.setPreviewMirrored(!profile.previewMirrored)}
           variant="secondary"
         />
-        <AppButton label="保存" onPress={() => void editor.save()} />
+        <AppButton
+          label="保存"
+          onPress={() => void editor.save()}
+          disabled={editor.status === 'invalid'}
+        />
         <AppButton label="調整前へ戻す" onPress={editor.undoChange} variant="secondary" />
         <AppButton label="前回保存値へ戻す" onPress={editor.revertToSaved} variant="secondary" />
         <AppButton label="初期値へリセット" onPress={editor.resetToDefault} variant="secondary" />

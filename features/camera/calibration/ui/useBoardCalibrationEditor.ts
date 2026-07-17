@@ -77,6 +77,10 @@ export function useBoardCalibrationEditor(): BoardCalibrationEditorApi {
   }, [reload]);
 
   const save = useCallback(async () => {
+    const saveValidation = validateCalibrationProfile(profile);
+    if (!saveValidation.valid) {
+      throw new Error(`INVALID_CALIBRATION:${saveValidation.reasons.join(',')}`);
+    }
     const saved = await saveBoardCalibrationProfile(profile);
     historyRef.current = [];
     setProfile(saved);

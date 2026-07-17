@@ -1,6 +1,6 @@
 import { DetectionEngine } from './DetectionEngine';
 import type { BoardCalibrationProfile } from '../../calibration/domain/types';
-import { scoreCanonicalPoint } from '../../calibration/domain/coordinateTransform';
+import { scoreCanonicalPointInViewport } from '../../calibration/domain/coordinateTransform';
 import type { SimpleBoardCalibration } from './SimpleBoardCalibration';
 import { scoreNormalizedPoint } from './SimpleBoardCalibration';
 import type { DetectionCandidate, LanCameraSegment } from '../../lan/domain/protocol';
@@ -76,7 +76,10 @@ export function analyzeImageDifference(
   const y =
     Math.floor(strongestIndex / input.thrownFrame.width) /
     Math.max(input.thrownFrame.height - 1, 1);
-  const score = scorePointWithCalibration({ x, y }, input.calibration);
+  const score = scorePointWithCalibration({ x, y }, input.calibration, {
+    containerWidth: input.thrownFrame.width,
+    containerHeight: input.thrownFrame.height,
+  });
   const candidate = new DetectionEngine().createCandidate({
     sessionId: input.sessionId,
     cameraNodeId: input.cameraNodeId,
@@ -125,9 +128,10 @@ export function createReplayDifferenceFrames(input: {
 function scorePointWithCalibration(
   point: { x: number; y: number },
   calibration: SimpleBoardCalibration | BoardCalibrationProfile,
+  dimensions: { containerWidth: number; containerHeight: number },
 ) {
   if ('version' in calibration && calibration.version === 2) {
-    const score = scoreCanonicalPoint(point, calibration);
+    const score = scoreCanonicalPointInViewport(point, calibration, dimensions);
     return {
       segment: (score.segmentNumber ?? 25) as LanCameraSegment,
       multiplier: score.multiplier,

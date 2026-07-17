@@ -1,11 +1,13 @@
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { useMemo, useState } from 'react';
+import type { GestureResponderEvent, LayoutChangeEvent, ViewProps } from 'react-native';
+import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { colors } from '../../constants/theme';
 import type {
   BoardCalibrationProfile,
   CalibrationRingKey,
 } from '../../features/camera/calibration/domain/types';
-import { applyPreviewMirror } from '../../features/camera/calibration/domain/coordinateTransform';
+import { getCalibrationViewportTransform } from '../../features/camera/calibration/domain/coordinateTransform';
 
 type BoardCalibrationOverlayProps = {
   profile: BoardCalibrationProfile;
@@ -13,10 +15,15 @@ type BoardCalibrationOverlayProps = {
   editable?: boolean;
   onSelectRing?: (ring: CalibrationRingKey) => void;
   onMoveCenter?: (deltaX: number, deltaY: number) => void;
+  onSetCenter?: (point: { x: number; y: number }) => void;
   onScaleOuter?: (delta: number) => void;
+  onSetOuterRadius?: (outerRadius: number) => void;
   onRotate?: (deltaDeg: number) => void;
+  onSetRotationDeg?: (rotationDeg: number) => void;
   onAdjustRing?: (ring: CalibrationRingKey, delta: number) => void;
 };
+
+type DragMode = 'center' | 'outer' | 'rotation';
 
 const ringStyles: {
   key: CalibrationRingKey;
@@ -38,26 +45,97 @@ export function BoardCalibrationOverlay({
   editable = false,
   onSelectRing,
   onMoveCenter,
+  onSetCenter,
   onScaleOuter,
+  onSetOuterRadius,
   onRotate,
+  onSetRotationDeg,
   onAdjustRing,
 }: BoardCalibrationOverlayProps) {
-  const displayCenter = applyPreviewMirror(
-    { x: profile.centerX, y: profile.centerY },
-    profile.previewMirrored,
+  const [layout, setLayout] = useState({ width: 1, height: 1 });
+  const transform = useMemo(
+    () =>
+      getCalibrationViewportTransform({
+        containerWidth: layout.width,
+        containerHeight: layout.height,
+        profile,
+      }),
+    [layout.height, layout.width, profile],
   );
+
+  const handleLayout = (event: LayoutChangeEvent) => {
+    const { width, height } = event.nativeEvent.layout;
+    if (width > 0 && height > 0) {
+      setLayout({ width, height });
+    }
+  };
+
+  const updateFromPointer = (mode: DragMode, event: GestureResponderEvent) => {
+    const point = {
+      x: event.nativeEvent.locationX,
+      y: event.nativeEvent.locationY,
+    };
+    if (mode === 'center') {
+      onSetCenter?.(transform.screenToCanonical(point));
+      return;
+    }
+
+    const canonical = transform.screenToCanonical(point);
+    const canonicalXPx = canonical.x * transform.containerWidth;
+    const canonicalYPx = canonical.y * transform.containerHeight;
+    const dx = canonicalXPx - transform.canonicalCenterXPx;
+    const dy = canonicalYPx - transform.canonicalCenterYPx;
+    if (mode === 'outer') {
+      onSetOuterRadius?.(Math.sqrt(dx * dx + dy * dy) / Math.max(1, transform.baseSize));
+      return;
+    }
+    onSetRotationDeg?.((Math.atan2(dx, -dy) * 180) / Math.PI);
+  };
+
+  const beginDrag = (mode: DragMode) => (event: GestureResponderEvent) => {
+    updateFromPointer(mode, event);
+  };
+
+  const webInteractionProps =
+    Platform.OS === 'web'
+      ? ({
+          tabIndex: 0,
+          onWheel: (event: { preventDefault?: () => void; deltaY?: number }) => {
+            if (!editable) {
+              return;
+            }
+            event.preventDefault?.();
+            onScaleOuter?.(-(event.deltaY ?? 0) * 0.0005);
+          },
+          onKeyDown: (event: { key?: string; shiftKey?: boolean; preventDefault?: () => void }) => {
+            if (!editable || !event.key?.startsWith('Arrow')) {
+              return;
+            }
+            event.preventDefault?.();
+            const pixels = event.shiftKey ? 10 : 1;
+            const deltaX =
+              event.key === 'ArrowLeft' ? -pixels : event.key === 'ArrowRight' ? pixels : 0;
+            const deltaY =
+              event.key === 'ArrowUp' ? -pixels : event.key === 'ArrowDown' ? pixels : 0;
+            onMoveCenter?.(deltaX / transform.containerWidth, deltaY / transform.containerHeight);
+          },
+        } as unknown as ViewProps)
+      : {};
 
   return (
     <View
+      {...webInteractionProps}
+      onLayout={handleLayout}
       pointerEvents={editable ? 'auto' : 'none'}
       style={styles.overlay}
       testID="board-calibration-overlay"
     >
       {ringStyles.map((ring) => {
-        const radius =
+        const normalizedRadius =
           ring.key === 'outer'
             ? profile.outerRadius
             : profile.outerRadius * Number(profile[ring.ratio]);
+        const radiusPx = normalizedRadius * transform.baseSize;
         const selected = selectedRing === ring.key;
         return (
           <Pressable
@@ -67,13 +145,15 @@ export function BoardCalibrationOverlay({
             disabled={!editable}
             onPress={() => onSelectRing?.(ring.key)}
             onLongPress={() => onAdjustRing?.(ring.key, 0.002)}
+            onStartShouldSetResponder={() => editable}
             style={[
               styles.ring,
               {
-                left: `${(displayCenter.x - radius) * 100}%`,
-                top: `${(displayCenter.y - radius) * 100}%`,
-                width: `${radius * 200}%`,
-                height: `${radius * 200}%`,
+                left: transform.centerXPx - radiusPx,
+                top: transform.centerYPx - radiusPx,
+                width: radiusPx * 2,
+                height: radiusPx * 2,
+                borderRadius: radiusPx,
               },
               selected && styles.selectedRing,
             ]}
@@ -86,11 +166,14 @@ export function BoardCalibrationOverlay({
         accessibilityLabel="Bull中心"
         disabled={!editable}
         onPress={() => onMoveCenter?.(0.002, 0)}
+        onStartShouldSetResponder={() => editable}
+        onResponderGrant={beginDrag('center')}
+        onResponderMove={(event) => updateFromPointer('center', event)}
         style={[
           styles.centerHandle,
           {
-            left: `${displayCenter.x * 100}%`,
-            top: `${displayCenter.y * 100}%`,
+            left: transform.centerXPx,
+            top: transform.centerYPx,
           },
         ]}
       >
@@ -102,16 +185,38 @@ export function BoardCalibrationOverlay({
         accessibilityLabel="20方向回転"
         disabled={!editable}
         onPress={() => onRotate?.(1)}
+        onStartShouldSetResponder={() => editable}
+        onResponderGrant={beginDrag('rotation')}
+        onResponderMove={(event) => updateFromPointer('rotation', event)}
         style={[
           styles.rotationHandle,
           {
-            left: `${displayCenter.x * 100}%`,
-            top: `${(displayCenter.y - profile.outerRadius) * 100}%`,
+            left: transform.boardToScreen({ x: 0, y: -1, radius: 1, angleDeg: 0 }).x,
+            top: transform.boardToScreen({ x: 0, y: -1, radius: 1, angleDeg: 0 }).y,
             transform: [{ rotate: `${profile.rotationDeg}deg` }],
           },
         ]}
       >
         <Text style={styles.rotationText}>20</Text>
+      </Pressable>
+
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="外周scale"
+        disabled={!editable}
+        onPress={() => onScaleOuter?.(0.01)}
+        onStartShouldSetResponder={() => editable}
+        onResponderGrant={beginDrag('outer')}
+        onResponderMove={(event) => updateFromPointer('outer', event)}
+        style={[
+          styles.outerHandle,
+          {
+            left: transform.centerXPx + transform.outerRadiusPx,
+            top: transform.centerYPx,
+          },
+        ]}
+      >
+        <Text style={styles.outerText}>↔</Text>
       </Pressable>
 
       <Text style={styles.orientationText}>ABC 正位置確認</Text>
@@ -125,7 +230,6 @@ const styles = StyleSheet.create({
   },
   ring: {
     position: 'absolute',
-    borderRadius: 999,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.72)',
     backgroundColor: 'rgba(255,255,255,0.02)',
@@ -164,6 +268,22 @@ const styles = StyleSheet.create({
   rotationText: {
     color: '#ffffff',
     fontSize: 12,
+    fontWeight: '900',
+  },
+  outerHandle: {
+    position: 'absolute',
+    width: 34,
+    height: 34,
+    marginLeft: -17,
+    marginTop: -17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 999,
+    backgroundColor: 'rgba(245,158,11,0.92)',
+  },
+  outerText: {
+    color: '#ffffff',
+    fontSize: 13,
     fontWeight: '900',
   },
   orientationText: {

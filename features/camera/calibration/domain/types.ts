@@ -1,5 +1,7 @@
 export type CalibrationStatus = 'unset' | 'editing' | 'saved' | 'invalid';
 
+export type CalibrationProjectionMode = 'circle' | 'perspective';
+
 export type CalibrationRingKey =
   | 'outer'
   | 'double_outer'
@@ -25,6 +27,7 @@ export type BoardCalibrationProfile = {
   version: 2;
   profileId: string;
   cameraDeviceId?: string;
+  projectionMode: CalibrationProjectionMode;
   previewMirrored: boolean;
   centerX: number;
   centerY: number;
@@ -38,6 +41,25 @@ export type BoardCalibrationProfile = {
   innerBullRatio: number;
   createdAt: string;
   updatedAt: string;
+};
+
+export type CalibrationViewportDimensions = {
+  containerWidth: number;
+  containerHeight: number;
+};
+
+export type CalibrationViewportTransform = CalibrationViewportDimensions & {
+  projectionMode: CalibrationProjectionMode;
+  baseSize: number;
+  centerXPx: number;
+  centerYPx: number;
+  outerRadiusPx: number;
+  canonicalCenterXPx: number;
+  canonicalCenterYPx: number;
+  screenToCanonical: (point: NormalizedPoint) => NormalizedPoint;
+  canonicalToScreen: (point: NormalizedPoint) => NormalizedPoint;
+  screenToBoard: (point: NormalizedPoint) => BoardPoint;
+  boardToScreen: (point: BoardPoint) => NormalizedPoint;
 };
 
 export type CalibrationValidationResult = {

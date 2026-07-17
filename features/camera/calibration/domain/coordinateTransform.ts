@@ -2,6 +2,8 @@ import type {
   BoardCalibrationProfile,
   BoardPoint,
   BoardScoreResult,
+  CalibrationViewportDimensions,
+  CalibrationViewportTransform,
   NormalizedPoint,
   ScoreArea,
 } from './types';
@@ -35,8 +37,22 @@ export function canonicalPointToBoardPoint(
   point: NormalizedPoint,
   profile: BoardCalibrationProfile,
 ): BoardPoint {
-  const dx = (point.x - profile.centerX) / profile.outerRadius;
-  const dy = (point.y - profile.centerY) / profile.outerRadius;
+  return canonicalPointToBoardPointInViewport(point, profile, {
+    containerWidth: 1,
+    containerHeight: 1,
+  });
+}
+
+export function canonicalPointToBoardPointInViewport(
+  point: NormalizedPoint,
+  profile: BoardCalibrationProfile,
+  dimensions: CalibrationViewportDimensions,
+): BoardPoint {
+  const transform = getCalibrationViewportTransform({ ...dimensions, profile });
+  const pointXPx = point.x * transform.containerWidth;
+  const pointYPx = point.y * transform.containerHeight;
+  const dx = (pointXPx - transform.canonicalCenterXPx) / transform.outerRadiusPx;
+  const dy = (pointYPx - transform.canonicalCenterYPx) / transform.outerRadiusPx;
   const radius = Math.sqrt(dx * dx + dy * dy);
   const angleDeg = normalizeDeg((Math.atan2(dx, -dy) * 180) / Math.PI - profile.rotationDeg);
   return {
@@ -113,20 +129,118 @@ export function scoreCanonicalPoint(
   return boardPointToScore(canonicalPointToBoardPoint(point, profile), profile, point);
 }
 
+export function scoreCanonicalPointInViewport(
+  point: NormalizedPoint,
+  profile: BoardCalibrationProfile,
+  dimensions: CalibrationViewportDimensions,
+): BoardScoreResult {
+  return boardPointToScore(
+    canonicalPointToBoardPointInViewport(point, profile, dimensions),
+    profile,
+    point,
+  );
+}
+
 export function scoreToApproximateBoardPoint(input: {
   area: ScoreArea;
   segmentNumber: number | null;
   profile: BoardCalibrationProfile;
 }): NormalizedPoint {
+  return scoreToApproximateBoardPointInViewport({
+    ...input,
+    containerWidth: 1,
+    containerHeight: 1,
+  });
+}
+
+export function scoreToApproximateBoardPointInViewport(
+  input: {
+    area: ScoreArea;
+    segmentNumber: number | null;
+    profile: BoardCalibrationProfile;
+  } & CalibrationViewportDimensions,
+): NormalizedPoint {
   const radius = resolveApproximateRadius(input.area, input.profile);
   const segmentIndex =
     input.segmentNumber == null
       ? 0
       : Math.max(0, wedgeOrderClockwise.indexOf(input.segmentNumber as never));
   const angle = (((segmentIndex * 18 + input.profile.rotationDeg) % 360) * Math.PI) / 180;
+  const transform = getCalibrationViewportTransform(input);
+  const pointXPx =
+    transform.canonicalCenterXPx + Math.sin(angle) * radius * transform.outerRadiusPx;
+  const pointYPx =
+    transform.canonicalCenterYPx - Math.cos(angle) * radius * transform.outerRadiusPx;
   return {
-    x: input.profile.centerX + Math.sin(angle) * radius * input.profile.outerRadius,
-    y: input.profile.centerY - Math.cos(angle) * radius * input.profile.outerRadius,
+    x: pointXPx / transform.containerWidth,
+    y: pointYPx / transform.containerHeight,
+  };
+}
+
+export function getCalibrationViewportTransform(input: {
+  containerWidth: number;
+  containerHeight: number;
+  profile: BoardCalibrationProfile;
+}): CalibrationViewportTransform {
+  const containerWidth = Math.max(1, input.containerWidth);
+  const containerHeight = Math.max(1, input.containerHeight);
+  const baseSize = Math.min(containerWidth, containerHeight);
+  const canonicalCenterXPx = input.profile.centerX * containerWidth;
+  const canonicalCenterYPx = input.profile.centerY * containerHeight;
+  const screenCenter = applyPreviewMirror(
+    { x: input.profile.centerX, y: input.profile.centerY },
+    input.profile.previewMirrored,
+  );
+  const outerRadiusPx = input.profile.outerRadius * baseSize;
+  const dimensions = { containerWidth, containerHeight };
+
+  const screenToCanonical = (point: NormalizedPoint) =>
+    removePreviewMirror(
+      {
+        x: point.x / containerWidth,
+        y: point.y / containerHeight,
+      },
+      input.profile.previewMirrored,
+    );
+
+  const canonicalToScreen = (point: NormalizedPoint) => {
+    const mirrored = applyPreviewMirror(point, input.profile.previewMirrored);
+    return {
+      x: mirrored.x * containerWidth,
+      y: mirrored.y * containerHeight,
+    };
+  };
+
+  return {
+    ...dimensions,
+    projectionMode: input.profile.projectionMode,
+    baseSize,
+    centerXPx: screenCenter.x * containerWidth,
+    centerYPx: screenCenter.y * containerHeight,
+    outerRadiusPx,
+    canonicalCenterXPx,
+    canonicalCenterYPx,
+    screenToCanonical,
+    canonicalToScreen,
+    screenToBoard: (point) =>
+      canonicalPointToBoardPointInViewport(screenToCanonical(point), input.profile, dimensions),
+    boardToScreen: (point) =>
+      canonicalToScreen(boardPointToCanonicalPointInViewport(point, input.profile, dimensions)),
+  };
+}
+
+function boardPointToCanonicalPointInViewport(
+  point: BoardPoint,
+  profile: BoardCalibrationProfile,
+  dimensions: CalibrationViewportDimensions,
+): NormalizedPoint {
+  const transform = getCalibrationViewportTransform({ ...dimensions, profile });
+  return {
+    x:
+      (transform.canonicalCenterXPx + point.x * transform.outerRadiusPx) / transform.containerWidth,
+    y:
+      (transform.canonicalCenterYPx + point.y * transform.outerRadiusPx) /
+      transform.containerHeight,
   };
 }
 

@@ -52,8 +52,11 @@ export default function CameraCalibrationScreen() {
             selectedRing={editor.selectedRing}
             onSelectRing={editor.setSelectedRing}
             onMoveCenter={editor.moveCenter}
+            onSetCenter={editor.setCenter}
             onScaleOuter={editor.scaleOuter}
+            onSetOuterRadius={editor.setOuterRadius}
             onRotate={editor.rotate}
+            onSetRotationDeg={editor.setRotationDeg}
             onAdjustRing={editor.updateRing}
           />
           {cameraSession.errorMessage ? (
