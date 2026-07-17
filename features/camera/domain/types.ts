@@ -5,6 +5,11 @@ export type CameraFacing = 'back' | 'front';
 
 export type CameraRuntimePlatform = 'ios' | 'android' | 'web';
 
+export type CapturedBoardImageSourceKind =
+  'data-uri' | 'raw-base64' | 'blob-url' | 'remote-url' | 'file-uri' | 'unknown';
+
+export type CapturedBoardImageBase64Encoding = 'data-uri' | 'raw-base64';
+
 export type CapturedBoardImage = {
   id: string;
   uri: string;
@@ -13,9 +18,12 @@ export type CapturedBoardImage = {
   capturedAt: string;
   platform: CameraRuntimePlatform;
   facing: CameraFacing;
-  mimeType: 'image/jpeg';
+  mimeType: string;
+  sourceKind: CapturedBoardImageSourceKind;
   base64Included: boolean;
-  base64Data?: string;
+  base64Encoding?: CapturedBoardImageBase64Encoding;
+  dataUri?: string;
+  rawBase64?: string;
 };
 
 export type CameraAvailabilityState = 'checking' | 'available' | 'unavailable' | 'error';

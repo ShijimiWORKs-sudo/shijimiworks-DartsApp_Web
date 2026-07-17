@@ -24,6 +24,7 @@ test('camera session keeps pending and accepted images in screen memory only', (
     platform: 'web',
     facing: 'back',
     mimeType: 'image/jpeg',
+    sourceKind: 'data-uri',
     base64Included: true,
   };
 

@@ -785,6 +785,29 @@ export default function CameraLocalCountUpPlayScreen() {
             <View style={styles.statusGrid}>
               <InfoRow label="状態" value={formatDetectionState(detectionState)} />
               <InfoRow label="基準画像" value={baselineFrameId ? '取得済み' : '未取得'} />
+              <InfoRow label="source" value={baselineFrameRef.current?.sourceKind ?? '-'} />
+              <InfoRow label="mime" value={baselineFrameRef.current?.mimeType ?? '-'} />
+              <InfoRow
+                label="captured"
+                value={
+                  baselineFrameRef.current?.capturedWidth &&
+                  baselineFrameRef.current?.capturedHeight
+                    ? `${baselineFrameRef.current.capturedWidth}×${baselineFrameRef.current.capturedHeight}`
+                    : '-'
+                }
+              />
+              <InfoRow
+                label="analysis"
+                value={
+                  baselineFrameRef.current?.analysisWidth &&
+                  baselineFrameRef.current?.analysisHeight
+                    ? `${baselineFrameRef.current.analysisWidth}×${baselineFrameRef.current.analysisHeight}`
+                    : '-'
+                }
+              />
+              <InfoRow label="uri prefix" value={baselineFrameRef.current?.uriPrefixKind ?? '-'} />
+              <InfoRow label="base64" value={baselineFrameRef.current?.base64Kind ?? '-'} />
+              <InfoRow label="decode" value={baselineFrameRef.current?.decodeStatus ?? '-'} />
               <InfoRow
                 label="変化量"
                 value={
@@ -1030,6 +1053,12 @@ function getMonitorErrorMessage(code: string) {
       return 'Webカメラのbase64画像を取得できませんでした。';
     case 'WEB_IMAGE_DECODE_FAILED':
       return '撮影画像を解析用に読み込めませんでした。';
+    case 'WEB_IMAGE_SOURCE_EMPTY':
+      return '撮影画像のsourceが空でした。';
+    case 'WEB_IMAGE_DATA_URI_INVALID':
+      return '撮影画像のData URI形式が不正でした。';
+    case 'WEB_IMAGE_MIME_UNSUPPORTED':
+      return '対応していない画像形式でした。';
     case 'WEB_CANVAS_UNAVAILABLE':
     case 'WEB_CANVAS_CONTEXT_UNAVAILABLE':
       return 'ブラウザの画像解析機能を利用できませんでした。';

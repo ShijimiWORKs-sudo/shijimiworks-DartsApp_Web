@@ -7,6 +7,15 @@ export type CameraAnalysisFrame = {
   height: number;
   grayPixels: Uint8Array;
   capturedAt: string;
+  sourceKind?: string;
+  mimeType?: string;
+  capturedWidth?: number;
+  capturedHeight?: number;
+  analysisWidth?: number;
+  analysisHeight?: number;
+  uriPrefixKind?: string;
+  base64Kind?: string;
+  decodeStatus?: 'success';
 };
 
 export type CameraFrameSource = {
