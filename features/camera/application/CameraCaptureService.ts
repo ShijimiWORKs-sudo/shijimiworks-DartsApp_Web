@@ -88,6 +88,7 @@ export function createCapturedBoardImage({
   id,
 }: CapturedBoardImageInput): CapturedBoardImage {
   const uri = picture.uri;
+  const base64Data = picture.base64 ?? extractBase64FromDataUri(uri);
 
   return {
     id,
@@ -98,6 +99,15 @@ export function createCapturedBoardImage({
     platform,
     facing,
     mimeType: 'image/jpeg',
-    base64Included: platform === 'web' && Boolean(picture.base64 || uri.startsWith('data:')),
+    base64Included: platform === 'web' && Boolean(base64Data),
+    base64Data: platform === 'web' ? base64Data : undefined,
   };
+}
+
+function extractBase64FromDataUri(uri: string) {
+  if (!uri.startsWith('data:')) {
+    return undefined;
+  }
+
+  return uri.split(',')[1] || undefined;
 }

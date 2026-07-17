@@ -6,9 +6,11 @@ import { scoreNormalizedPoint } from './SimpleBoardCalibration';
 import type { DetectionCandidate, LanCameraSegment } from '../../lan/domain/protocol';
 
 export type GrayscaleFrame = {
+  frameId?: string;
   width: number;
   height: number;
-  pixels: Uint8ClampedArray | number[];
+  pixels: Uint8Array | Uint8ClampedArray | number[];
+  capturedAt?: string;
 };
 
 export type BasicImageDifferenceInput = {
@@ -27,6 +29,9 @@ export type BasicImageDifferenceResult =
   | {
       status: 'candidate';
       candidate: DetectionCandidate;
+      alternateCandidates: DetectionCandidate[];
+      changedPixelRatio: number;
+      boundingBox: { x: number; y: number; width: number; height: number } | null;
       processingMs: number;
     }
   | {
@@ -52,19 +57,29 @@ export function analyzeImageDifference(
   }
 
   const threshold = input.threshold ?? 38;
-  let strongestIndex = -1;
-  let strongestDelta = 0;
+  const strongest = createStrongestAccumulator();
   const length = input.baselineFrame.pixels.length;
+  let changedPixelCount = 0;
+  let minX = input.thrownFrame.width;
+  let minY = input.thrownFrame.height;
+  let maxX = -1;
+  let maxY = -1;
 
   for (let index = 0; index < length; index += 1) {
     const delta = Math.abs(input.thrownFrame.pixels[index] - input.baselineFrame.pixels[index]);
-    if (delta > strongestDelta) {
-      strongestDelta = delta;
-      strongestIndex = index;
+    if (delta >= threshold) {
+      changedPixelCount += 1;
+      const x = index % input.thrownFrame.width;
+      const y = Math.floor(index / input.thrownFrame.width);
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x);
+      maxY = Math.max(maxY, y);
+      addStrongCandidate(strongest, { index, delta, x, y }, input.thrownFrame.width);
     }
   }
 
-  if (strongestIndex < 0 || strongestDelta < threshold) {
+  if (strongest.length === 0) {
     return {
       status: 'no_candidate',
       reason: 'NO_SIGNIFICANT_CHANGE',
@@ -72,30 +87,30 @@ export function analyzeImageDifference(
     };
   }
 
-  const x = (strongestIndex % input.thrownFrame.width) / Math.max(input.thrownFrame.width - 1, 1);
-  const y =
-    Math.floor(strongestIndex / input.thrownFrame.width) /
-    Math.max(input.thrownFrame.height - 1, 1);
-  const score = scorePointWithCalibration({ x, y }, input.calibration, {
-    containerWidth: input.thrownFrame.width,
-    containerHeight: input.thrownFrame.height,
-  });
-  const candidate = new DetectionEngine().createCandidate({
-    sessionId: input.sessionId,
-    cameraNodeId: input.cameraNodeId,
-    throwIndex: input.throwIndex,
-    segment: score.segment,
-    multiplier: score.multiplier,
-    confidence: Math.min(0.98, Math.max(score.confidence, strongestDelta / 255)),
-    normalizedX: score.normalizedX,
-    normalizedY: score.normalizedY,
-    now: input.now,
-    random: input.random,
+  const boundingBox =
+    changedPixelCount === 0
+      ? null
+      : {
+          x: minX / input.thrownFrame.width,
+          y: minY / input.thrownFrame.height,
+          width: (maxX - minX + 1) / input.thrownFrame.width,
+          height: (maxY - minY + 1) / input.thrownFrame.height,
+        };
+  const changedPixelRatio = changedPixelCount / length;
+  const candidateInputs = strongest.map((entry, offset) =>
+    createCandidateFromStrongestEntry(input, entry, offset),
+  );
+  const [candidate, ...alternateCandidates] = enrichCandidates(candidateInputs, input, {
+    changedPixelRatio,
+    boundingBox,
   });
 
   return {
     status: 'candidate',
     candidate,
+    alternateCandidates,
+    changedPixelRatio,
+    boundingBox,
     processingMs: Date.now() - startedAt,
   };
 }
@@ -141,4 +156,84 @@ function scorePointWithCalibration(
     };
   }
   return scoreNormalizedPoint(point, calibration);
+}
+
+type StrongestEntry = {
+  index: number;
+  delta: number;
+  x: number;
+  y: number;
+};
+
+function createStrongestAccumulator(): StrongestEntry[] {
+  return [];
+}
+
+function addStrongCandidate(entries: StrongestEntry[], candidate: StrongestEntry, width: number) {
+  if (
+    entries.some(
+      (entry) => Math.abs(entry.x - candidate.x) + Math.abs(entry.y - candidate.y) < width * 0.08,
+    )
+  ) {
+    return;
+  }
+
+  entries.push(candidate);
+  entries.sort((a, b) => b.delta - a.delta);
+  if (entries.length > 3) {
+    entries.length = 3;
+  }
+}
+
+function createCandidateFromStrongestEntry(
+  input: BasicImageDifferenceInput,
+  entry: StrongestEntry,
+  offset: number,
+): DetectionCandidate {
+  const x = entry.x / Math.max(input.thrownFrame.width - 1, 1);
+  const y = entry.y / Math.max(input.thrownFrame.height - 1, 1);
+  const score = scorePointWithCalibration({ x, y }, input.calibration, {
+    containerWidth: input.thrownFrame.width,
+    containerHeight: input.thrownFrame.height,
+  });
+  return new DetectionEngine().createCandidate({
+    sessionId: input.sessionId,
+    cameraNodeId: input.cameraNodeId,
+    throwIndex: input.throwIndex,
+    segment: score.segment,
+    multiplier: score.multiplier,
+    confidence: Math.min(0.98, Math.max(score.confidence - offset * 0.08, entry.delta / 255)),
+    normalizedX: score.normalizedX,
+    normalizedY: score.normalizedY,
+    now: input.now,
+    random: input.random,
+  });
+}
+
+function enrichCandidates(
+  candidates: DetectionCandidate[],
+  input: BasicImageDifferenceInput,
+  metadata: {
+    changedPixelRatio: number;
+    boundingBox: { x: number; y: number; width: number; height: number } | null;
+  },
+): DetectionCandidate[] {
+  const candidateIds = candidates.map((candidate) => candidate.candidateId);
+  const calibrationProfileId =
+    'profileId' in input.calibration ? input.calibration.profileId : undefined;
+
+  return candidates.map((candidate) => ({
+    ...candidate,
+    frameId: input.thrownFrame.frameId ?? candidate.frameId,
+    capturedAt: input.thrownFrame.capturedAt ?? candidate.capturedAt,
+    baselineFrameId: input.baselineFrame.frameId,
+    changedPixelRatio: metadata.changedPixelRatio,
+    boundingBox: metadata.boundingBox,
+    reason: 'REAL_FRAME_DIFF',
+    alternateCandidateIds: candidateIds.filter(
+      (candidateId) => candidateId !== candidate.candidateId,
+    ),
+    calibrationProfileId,
+    algorithmVersion: 'basic-image-difference-v1',
+  }));
 }

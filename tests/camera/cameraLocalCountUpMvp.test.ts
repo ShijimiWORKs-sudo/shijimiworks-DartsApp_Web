@@ -69,8 +69,8 @@ test('camera COUNT-UP routes expose playable MVP controls without WebSocket depe
   assert.match(settings, /自動判定/);
   assert.match(settings, /音声・演出/);
   assert.match(play, /CameraView/);
-  assert.match(play, /基準フレーム取得/);
-  assert.match(play, /現在画像を解析/);
+  assert.match(play, /基準画像を取得/);
+  assert.match(play, /onAnalyzeCurrentFrame/);
   assert.match(play, /位置修正/);
   assert.match(play, /手動入力/);
   assert.match(play, /Undo/);
@@ -80,6 +80,61 @@ test('camera COUNT-UP routes expose playable MVP controls without WebSocket depe
   assert.match(play, /AwardOverlay/);
   assert.match(result, /カメラCOUNT-UP結果/);
   assert.doesNotMatch(play, /useLanCameraPeer|WebSocket|pairingCode/);
+});
+
+test('camera COUNT-UP production route uses real frame source instead of replay fixtures', () => {
+  const play = readRepoFile('app/camera/local-count-up/[gameId]/index.tsx');
+
+  assert.match(play, /WebCameraFrameSource/);
+  assert.match(play, /frameSource\.captureFrame\(\)/);
+  assert.match(play, /baselineFrameRef/);
+  assert.match(play, /pendingThrownFrameRef/);
+  assert.match(play, /analyzeFrameMotion/);
+  assert.match(play, /analyzeImageDifference/);
+  assert.match(play, /toGrayscaleFrame\(baselineFrameRef\.current\)/);
+  assert.doesNotMatch(play, /createReplayDifferenceFrames/);
+  assert.doesNotMatch(play, /changedX|changedY/);
+  assert.doesNotMatch(play, /Bull fallback|fallback.*20|segment: 20,[\s\S]*confidence: 0\.72/);
+});
+
+test('camera COUNT-UP automatic detection exposes state machine and loop controls', () => {
+  const play = readRepoFile('app/camera/local-count-up/[gameId]/index.tsx');
+
+  for (const state of [
+    'camera_not_ready',
+    'baseline_capturing',
+    'waiting_throw',
+    'motion_detected',
+    'waiting_stable',
+    'analyzing',
+    'waiting_confirmation',
+    'paused',
+    'error',
+  ]) {
+    assert.match(play, new RegExp(state));
+  }
+
+  assert.match(play, /自動判定状態/);
+  assert.match(play, /変化量/);
+  assert.match(play, /静止時間/);
+  assert.match(play, /処理時間/);
+  assert.match(play, /自動監視開始/);
+  assert.match(play, /自動監視停止/);
+  assert.match(play, /ダーツを抜きました／次ラウンド開始/);
+  assert.match(play, /stopMonitorLoop/);
+  assert.match(play, /monitorInFlightRef/);
+  assert.match(play, /setTimeout\(tick, throwDetectionThresholds\.frameIntervalMs\)/);
+});
+
+test('camera COUNT-UP baseline updates only after candidate confirmation', () => {
+  const play = readRepoFile('app/camera/local-count-up/[gameId]/index.tsx');
+
+  assert.match(play, /await adapter\.recordCandidate/);
+  assert.match(play, /baselineFrameRef\.current = pendingThrownFrameRef\.current/);
+  assert.match(play, /候補を拒否しました。基準画像は更新していません/);
+  assert.match(play, /手動入力を保存しました。盤面とDBを合わせるため基準画像を再取得してください/);
+  assert.match(play, /Undoしました。盤面とDBを合わせるため基準画像を再取得してください/);
+  assert.match(play, /Redoしました。盤面とDBを合わせるため基準画像を再取得してください/);
 });
 
 test('camera COUNT-UP settings resolve active sessions from the screen', () => {

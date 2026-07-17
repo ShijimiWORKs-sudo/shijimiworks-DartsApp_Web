@@ -15,6 +15,7 @@ export type CapturedBoardImage = {
   facing: CameraFacing;
   mimeType: 'image/jpeg';
   base64Included: boolean;
+  base64Data?: string;
 };
 
 export type CameraAvailabilityState = 'checking' | 'available' | 'unavailable' | 'error';

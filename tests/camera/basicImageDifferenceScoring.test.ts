@@ -54,6 +54,8 @@ test('basic image difference generates a camera candidate from strongest changed
   if (result.status === 'candidate') {
     assert.equal(result.candidate.type, 'detection_candidate');
     assert.equal(result.candidate.segment, 20);
+    assert.ok(result.changedPixelRatio > 0);
+    assert.ok(result.boundingBox);
   }
 });
 
@@ -110,6 +112,29 @@ test('basic image difference replay fixture generates deterministic calibrated c
   assert.equal(second.status, 'candidate');
   if (first.status === 'candidate' && second.status === 'candidate') {
     assert.deepEqual(first.candidate, second.candidate);
+  }
+});
+
+test('basic image difference can return alternate candidates from the same real frame pair', () => {
+  const baselineFrame = createFrame(10, 10);
+  const thrownFrame = createFrame(10, 10);
+  thrownFrame.pixels[1 * 10 + 5] = 255;
+  thrownFrame.pixels[5 * 10 + 5] = 230;
+  thrownFrame.pixels[8 * 10 + 8] = 220;
+
+  const result = analyzeImageDifference({
+    sessionId: 'session-real-frame',
+    cameraNodeId: 'camera-node',
+    throwIndex: 1,
+    baselineFrame,
+    thrownFrame,
+    calibration,
+  });
+
+  assert.equal(result.status, 'candidate');
+  if (result.status === 'candidate') {
+    assert.equal(result.alternateCandidates.length, 2);
+    assert.equal(result.candidate.type, 'detection_candidate');
   }
 });
 

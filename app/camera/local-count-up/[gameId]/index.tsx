@@ -1,6 +1,6 @@
 import { CameraView } from 'expo-camera';
 import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { AppButton } from '../../../../components/AppButton';
@@ -19,14 +19,18 @@ import { AwardEvaluator } from '../../../../features/awards/application/AwardEva
 import { AwardQueue } from '../../../../features/awards/application/AwardQueue';
 import { AwardRegistry } from '../../../../features/awards/application/AwardRegistry';
 import type { AwardEvent } from '../../../../features/awards/domain/types';
-import { scoreCanonicalPoint } from '../../../../features/camera/calibration/domain/coordinateTransform';
 import { useBoardCalibrationEditor } from '../../../../features/camera/calibration/ui/useBoardCalibrationEditor';
-import {
-  analyzeImageDifference,
-  createReplayDifferenceFrames,
-} from '../../../../features/camera/detection/application/BasicImageDifferenceScoring';
+import { analyzeImageDifference } from '../../../../features/camera/detection/application/BasicImageDifferenceScoring';
 import { CameraLocalCountUpAdapter } from '../../../../features/camera/detection/application/CameraLocalCountUpAdapter';
-import { DetectionEngine } from '../../../../features/camera/detection/application/DetectionEngine';
+import {
+  analyzeFrameMotion,
+  throwDetectionThresholds,
+  toGrayscaleFrame,
+  type CameraAnalysisFrame,
+  type DetectionState,
+  type MotionAnalysis,
+} from '../../../../features/camera/detection/application/CameraFrameSource';
+import { WebCameraFrameSource } from '../../../../features/camera/detection/infrastructure/WebCameraFrameSource';
 import { useCameraSession } from '../../../../features/camera/ui/useCameraSession';
 import {
   clearCountUpRedoSession,
@@ -36,9 +40,9 @@ import type { CountUpGameState } from '../../../../features/game/domain/countUp'
 import type { DartArea } from '../../../../features/game/domain/types';
 import { useGameDatabase } from '../../../../contexts/GameDatabaseContext';
 
-const detectionEngine = new DetectionEngine();
 const awardEvaluator = new AwardEvaluator();
 const awardRegistry = new AwardRegistry();
+const localCameraNodeId = 'local-count-up-camera';
 
 export default function CameraLocalCountUpPlayScreen() {
   const router = useRouter();
@@ -66,10 +70,31 @@ export default function CameraLocalCountUpPlayScreen() {
   const [canRedo, setCanRedo] = useState(false);
   const [currentAward, setCurrentAward] = useState<AwardEvent | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [detectionState, setDetectionState] = useState<DetectionState>(
+    autoDetection ? 'camera_not_ready' : 'disabled',
+  );
+  const [autoMonitorEnabled, setAutoMonitorEnabled] = useState(autoDetection);
+  const [baselineFrameId, setBaselineFrameId] = useState<string | null>(null);
+  const [motionAnalysis, setMotionAnalysis] = useState<MotionAnalysis | null>(null);
+  const [stableStartedAt, setStableStartedAt] = useState<number | null>(null);
+  const [lastProcessingMs, setLastProcessingMs] = useState<number | null>(null);
+  const baselineFrameRef = useRef<CameraAnalysisFrame | null>(null);
+  const pendingThrownFrameRef = useRef<CameraAnalysisFrame | null>(null);
+  const monitorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const monitorInFlightRef = useRef(false);
+  const monitorGenerationRef = useRef(0);
+  const mountedRef = useRef(false);
 
   const adapter = useMemo(
     () => (services ? new CameraLocalCountUpAdapter(services.countUp) : null),
     [services],
+  );
+  const frameSource = useMemo(
+    () =>
+      new WebCameraFrameSource({
+        captureImage: () => cameraSession.capturePicture(cameraRef.current),
+      }),
+    [cameraSession],
   );
 
   const currentTurn = useMemo(
@@ -81,6 +106,16 @@ export default function CameraLocalCountUpPlayScreen() {
     [currentTurn],
   );
   const inputDisabled = !game || game.status !== 'in_progress' || activeDarts.length >= 3 || isBusy;
+  const canAutoMonitor =
+    autoMonitorEnabled &&
+    autoDetection &&
+    cameraSession.canTakePicture &&
+    calibrationEditor.status === 'saved' &&
+    game?.status === 'in_progress' &&
+    activeDarts.length < 3 &&
+    candidateOptions.length === 0 &&
+    currentAward === null &&
+    !isBusy;
 
   const syncRedoState = useCallback(() => {
     setCanRedo(redoSessionRef.current.canRedo);
@@ -88,6 +123,26 @@ export default function CameraLocalCountUpPlayScreen() {
 
   const clearRedoSession = useCallback(() => {
     clearCountUpRedoSession(redoSessionRef.current, setCanRedo);
+  }, []);
+
+  const stopMonitorLoop = useCallback(() => {
+    monitorGenerationRef.current += 1;
+    if (monitorTimerRef.current) {
+      clearTimeout(monitorTimerRef.current);
+      monitorTimerRef.current = null;
+    }
+    monitorInFlightRef.current = false;
+  }, []);
+
+  const clearBaseline = useCallback((message: string) => {
+    baselineFrameRef.current = null;
+    pendingThrownFrameRef.current = null;
+    setBaselineFrameId(null);
+    setStableStartedAt(null);
+    setMotionAnalysis(null);
+    setCandidateOptions([]);
+    setCandidateMessage(message);
+    setDetectionState('paused');
   }, []);
 
   const loadGame = useCallback(async () => {
@@ -105,6 +160,7 @@ export default function CameraLocalCountUpPlayScreen() {
   useFocusEffect(
     useCallback(() => {
       let mounted = true;
+      mountedRef.current = true;
       void loadGame().catch((error) => {
         if (mounted) {
           console.warn('Camera COUNT-UP load failed', error);
@@ -113,9 +169,11 @@ export default function CameraLocalCountUpPlayScreen() {
       });
       return () => {
         mounted = false;
+        mountedRef.current = false;
+        stopMonitorLoop();
         clearRedoSession();
       };
-    }, [clearRedoSession, loadGame]),
+    }, [clearRedoSession, loadGame, stopMonitorLoop]),
   );
 
   const runAction = useCallback(
@@ -144,13 +202,38 @@ export default function CameraLocalCountUpPlayScreen() {
   );
 
   const captureBaseline = useCallback(async () => {
-    const image = await cameraSession.capturePicture(cameraRef.current);
-    if (!image) {
-      setCandidateMessage('基準フレームを取得できませんでした。手動入力は利用できます。');
+    if (calibrationEditor.status !== 'saved') {
+      setCandidateMessage(
+        'Calibrationを保存してから自動判定を開始してください。手動入力は利用できます。',
+      );
+      setDetectionState('error');
       return;
     }
-    setCandidateMessage('基準フレーム取得済み。現在画像を解析できます。');
-  }, [cameraSession]);
+
+    setDetectionState('baseline_capturing');
+    setCandidateMessage('基準画像を取得中です。');
+    try {
+      const frame = await frameSource.captureFrame();
+      if (!mountedRef.current) {
+        return;
+      }
+      baselineFrameRef.current = frame;
+      pendingThrownFrameRef.current = null;
+      setBaselineFrameId(frame.frameId);
+      setStableStartedAt(null);
+      setMotionAnalysis(null);
+      setCandidateOptions([]);
+      setLastProcessingMs(null);
+      setDetectionState('waiting_throw');
+      setCandidateMessage('基準画像を取得しました。投擲待機中です。');
+    } catch (error) {
+      console.warn('Baseline frame capture failed', error);
+      if (mountedRef.current) {
+        setDetectionState('error');
+        setCandidateMessage('基準画像を取得できませんでした。手動入力は利用できます。');
+      }
+    }
+  }, [calibrationEditor.status, frameSource]);
 
   const detectThrow = useCallback(async () => {
     if (!autoDetection) {
@@ -159,33 +242,192 @@ export default function CameraLocalCountUpPlayScreen() {
       return;
     }
 
-    if (calibrationEditor.status === 'invalid') {
-      setCandidateMessage('Calibrationが無効です。手動入力で続行するか、設定を保存してください。');
+    if (calibrationEditor.status !== 'saved') {
+      setCandidateMessage(
+        'Calibrationを保存してから自動判定を開始してください。手動入力は利用できます。',
+      );
       setCandidateOptions([]);
       return;
     }
 
-    const captured = await cameraSession.capturePicture(cameraRef.current);
-    if (!captured && cameraSession.permissionState === 'granted') {
-      setCandidateMessage('現在画像を取得できませんでした。手動入力で続行できます。');
+    if (!baselineFrameRef.current) {
+      setCandidateMessage('基準画像が未取得です。先に基準画像を再取得してください。');
+      setCandidateOptions([]);
+      setDetectionState('baseline_capturing');
+      return;
     }
 
-    const throwIndex = activeDarts.length + 1;
-    const candidates = createCandidateOptions(
-      gameId ?? 'local-count-up',
-      throwIndex,
-      calibrationEditor.profile,
-    );
-    setCandidateOptions(candidates);
-    setSelectedCandidateIndex(0);
-    setCandidateMessage('第一候補を生成しました。Confidenceと処理時間を確認して確定できます。');
+    setDetectionState('analyzing');
+    setCandidateMessage('判定中です。');
+    try {
+      const thrownFrame = await frameSource.captureFrame();
+      if (!mountedRef.current || !baselineFrameRef.current) {
+        return;
+      }
+      const throwIndex = activeDarts.length + 1;
+      const result = analyzeImageDifference({
+        sessionId: gameId ?? 'local-count-up',
+        cameraNodeId: localCameraNodeId,
+        throwIndex,
+        baselineFrame: toGrayscaleFrame(baselineFrameRef.current),
+        thrownFrame: toGrayscaleFrame(thrownFrame),
+        calibration: calibrationEditor.profile,
+        now: new Date(),
+      });
+      setLastProcessingMs(result.processingMs);
+      if (result.status === 'candidate') {
+        pendingThrownFrameRef.current = thrownFrame;
+        const options = createCandidateOptionsFromResult(result);
+        setCandidateOptions(options);
+        setSelectedCandidateIndex(0);
+        setDetectionState('waiting_confirmation');
+        setCandidateMessage('候補確認待ちです。第一候補から確認してください。');
+        return;
+      }
+
+      pendingThrownFrameRef.current = null;
+      setCandidateOptions([]);
+      setDetectionState('error');
+      setCandidateMessage(
+        '候補を生成できませんでした。基準画像を再取得するか手動入力で続行してください。',
+      );
+    } catch (error) {
+      console.warn('Throw frame analysis failed', error);
+      if (mountedRef.current) {
+        setDetectionState('error');
+        setCandidateOptions([]);
+        setCandidateMessage('候補を生成できませんでした。手動入力で続行できます。');
+      }
+    }
   }, [
     activeDarts.length,
     autoDetection,
     calibrationEditor.profile,
     calibrationEditor.status,
-    cameraSession,
+    frameSource,
     gameId,
+  ]);
+
+  const processMonitorFrame = useCallback(
+    async (generation: number) => {
+      if (monitorInFlightRef.current || !canAutoMonitor) {
+        return;
+      }
+
+      monitorInFlightRef.current = true;
+      try {
+        if (!baselineFrameRef.current) {
+          await captureBaseline();
+          return;
+        }
+
+        const currentFrame = await frameSource.captureFrame();
+        if (!mountedRef.current || generation !== monitorGenerationRef.current) {
+          return;
+        }
+
+        const motion = analyzeFrameMotion({
+          baselineFrame: baselineFrameRef.current,
+          currentFrame,
+          calibration: calibrationEditor.profile,
+        });
+        setMotionAnalysis(motion);
+
+        if (motion.reason === 'frame_size_mismatch') {
+          setDetectionState('error');
+          setCandidateMessage('フレームサイズが変わりました。基準画像を再取得してください。');
+          return;
+        }
+
+        if (motion.reason === 'obstruction') {
+          setDetectionState('waiting_stable');
+          setStableStartedAt(null);
+          setCandidateMessage(
+            '大きな動きを検出しました。手や身体が映らなくなるまで待機しています。',
+          );
+          return;
+        }
+
+        if (motion.reason === 'motion') {
+          setDetectionState('motion_detected');
+          setStableStartedAt(null);
+          setCandidateMessage('動きを検出しました。静止待ちです。');
+          return;
+        }
+
+        if (motion.reason === 'stable') {
+          const now = Date.now();
+          const startedAt = stableStartedAt ?? now;
+          setStableStartedAt(startedAt);
+          const stableMs = now - startedAt;
+          setDetectionState(
+            stableMs >= throwDetectionThresholds.stableDurationMs ? 'analyzing' : 'waiting_stable',
+          );
+          setCandidateMessage(
+            stableMs >= throwDetectionThresholds.stableDurationMs
+              ? '静止しました。判定中です。'
+              : '静止待ちです。',
+          );
+          if (stableMs >= throwDetectionThresholds.stableDurationMs) {
+            await detectThrow();
+          }
+          return;
+        }
+
+        setDetectionState('waiting_throw');
+      } catch (error) {
+        console.warn('Automatic throw monitor failed', error);
+        if (mountedRef.current) {
+          setDetectionState('error');
+          setCandidateMessage('自動監視でフレームを取得できませんでした。手動入力で続行できます。');
+        }
+      } finally {
+        monitorInFlightRef.current = false;
+      }
+    },
+    [
+      calibrationEditor.profile,
+      canAutoMonitor,
+      captureBaseline,
+      detectThrow,
+      frameSource,
+      stableStartedAt,
+    ],
+  );
+
+  useEffect(() => {
+    stopMonitorLoop();
+    if (!canAutoMonitor) {
+      if (!autoDetection) {
+        setDetectionState('disabled');
+      } else if (!cameraSession.canTakePicture) {
+        setDetectionState('camera_not_ready');
+      } else if (game?.status === 'paused') {
+        setDetectionState('paused');
+      }
+      return;
+    }
+
+    const generation = monitorGenerationRef.current;
+    const tick = () => {
+      if (generation !== monitorGenerationRef.current || !mountedRef.current) {
+        return;
+      }
+      void processMonitorFrame(generation).finally(() => {
+        if (generation === monitorGenerationRef.current && mountedRef.current) {
+          monitorTimerRef.current = setTimeout(tick, throwDetectionThresholds.frameIntervalMs);
+        }
+      });
+    };
+    monitorTimerRef.current = setTimeout(tick, throwDetectionThresholds.frameIntervalMs);
+    return stopMonitorLoop;
+  }, [
+    autoDetection,
+    cameraSession.canTakePicture,
+    canAutoMonitor,
+    game?.status,
+    processMonitorFrame,
+    stopMonitorLoop,
   ]);
 
   const confirmCandidate = useCallback(
@@ -208,8 +450,16 @@ export default function CameraLocalCountUpPlayScreen() {
           source,
         });
         clearRedoSession();
+        if (pendingThrownFrameRef.current) {
+          baselineFrameRef.current = pendingThrownFrameRef.current;
+          setBaselineFrameId(pendingThrownFrameRef.current.frameId);
+          pendingThrownFrameRef.current = null;
+          setDetectionState('waiting_throw');
+        }
         setCandidateOptions([]);
-        setCandidateMessage('候補を確定しました。');
+        setStableStartedAt(null);
+        setMotionAnalysis(null);
+        setCandidateMessage('候補を確定しました。次の投擲待機中です。');
         return nextGame;
       });
     },
@@ -232,10 +482,13 @@ export default function CameraLocalCountUpPlayScreen() {
       void runAction(async () => {
         const nextGame = await adapter.recordManual(game.gameId, { area, segmentNumber });
         clearRedoSession();
+        clearBaseline(
+          '手動入力を保存しました。盤面とDBを合わせるため基準画像を再取得してください。',
+        );
         return nextGame;
       });
     },
-    [adapter, clearRedoSession, game, inputDisabled, runAction],
+    [adapter, clearBaseline, clearRedoSession, game, inputDisabled, runAction],
   );
 
   const confirmTurn = useCallback(() => {
@@ -254,9 +507,10 @@ export default function CameraLocalCountUpPlayScreen() {
       }
       const nextGame = await adapter.confirmTurn(game.gameId);
       clearRedoSession();
+      clearBaseline('ラウンドを確定しました。ダーツを抜いて基準画像を再取得してください。');
       return nextGame;
     });
-  }, [activeDarts, adapter, awardsEnabled, clearRedoSession, game, runAction]);
+  }, [activeDarts, adapter, awardsEnabled, clearBaseline, clearRedoSession, game, runAction]);
 
   const currentAwardAsset = currentAward ? awardRegistry.get(currentAward.code) : null;
 
@@ -335,6 +589,48 @@ export default function CameraLocalCountUpPlayScreen() {
 
         <View style={styles.sideColumn}>
           <Card>
+            <SectionTitle title="自動判定状態" tone="card" />
+            <View style={styles.statusGrid}>
+              <InfoRow label="状態" value={formatDetectionState(detectionState)} />
+              <InfoRow label="基準画像" value={baselineFrameId ? '取得済み' : '未取得'} />
+              <InfoRow
+                label="変化量"
+                value={
+                  motionAnalysis ? `${(motionAnalysis.changedPixelRatio * 100).toFixed(1)}%` : '-'
+                }
+              />
+              <InfoRow
+                label="静止時間"
+                value={stableStartedAt ? `${Date.now() - stableStartedAt}ms` : '-'}
+              />
+              <InfoRow label="処理時間" value={lastProcessingMs ? `${lastProcessingMs}ms` : '-'} />
+            </View>
+            <View style={styles.actionGrid}>
+              <AppButton
+                label="自動監視開始"
+                onPress={() => setAutoMonitorEnabled(true)}
+                disabled={!autoDetection || autoMonitorEnabled}
+              />
+              <AppButton
+                label="自動監視停止"
+                onPress={() => {
+                  setAutoMonitorEnabled(false);
+                  stopMonitorLoop();
+                  setDetectionState('paused');
+                }}
+                disabled={!autoMonitorEnabled}
+                variant="secondary"
+              />
+              <AppButton
+                label="ダーツを抜きました／次ラウンド開始"
+                onPress={() => void captureBaseline()}
+                disabled={isBusy}
+                variant="secondary"
+              />
+            </View>
+          </Card>
+
+          <Card>
             <SectionTitle
               title="候補"
               subtitle="判定が外れても位置修正・手動入力・MISSで続行できます。"
@@ -351,6 +647,14 @@ export default function CameraLocalCountUpPlayScreen() {
                 confirmCandidate('camera_confirmed', index);
               }}
               onCorrect={() => confirmCandidate('camera_corrected')}
+              onReject={() => {
+                pendingThrownFrameRef.current = null;
+                setCandidateOptions([]);
+                setDetectionState('waiting_throw');
+                setCandidateMessage(
+                  '候補を拒否しました。基準画像は更新していません。再解析または手動入力を選んでください。',
+                );
+              }}
               onMiss={() => recordManual('miss', null)}
               onCaptureBaseline={() => void captureBaseline()}
               onAnalyzeCurrentFrame={() => void detectThrow()}
@@ -392,6 +696,9 @@ export default function CameraLocalCountUpPlayScreen() {
                       redoSessionRef.current.push(dartId);
                       syncRedoState();
                     }
+                    clearBaseline(
+                      'Undoしました。盤面とDBを合わせるため基準画像を再取得してください。',
+                    );
                     return nextGame;
                   });
                 }}
@@ -414,6 +721,9 @@ export default function CameraLocalCountUpPlayScreen() {
                   void runAction(async () => {
                     const nextGame = await adapter.redoDart(game.gameId, dartId);
                     syncRedoState();
+                    clearBaseline(
+                      'Redoしました。盤面とDBを合わせるため基準画像を再取得してください。',
+                    );
                     return nextGame;
                   });
                 }}
@@ -428,8 +738,15 @@ export default function CameraLocalCountUpPlayScreen() {
                   }
                   void runAction(() =>
                     game.status === 'paused'
-                      ? adapter.resumeGame(game.gameId)
-                      : adapter.pauseGame(game.gameId),
+                      ? adapter.resumeGame(game.gameId).then((nextGame) => {
+                          clearBaseline('再開しました。基準画像を再取得してください。');
+                          return nextGame;
+                        })
+                      : adapter.pauseGame(game.gameId).then((nextGame) => {
+                          stopMonitorLoop();
+                          setDetectionState('paused');
+                          return nextGame;
+                        }),
                   );
                 }}
                 disabled={isBusy || !game || game.status === 'completed'}
@@ -442,6 +759,7 @@ export default function CameraLocalCountUpPlayScreen() {
                     return;
                   }
                   void runAction(async () => {
+                    stopMonitorLoop();
                     clearRedoSession();
                     await adapter.abortGame(game.gameId);
                     router.replace('/camera/home');
@@ -470,78 +788,51 @@ export default function CameraLocalCountUpPlayScreen() {
   );
 }
 
-function createCandidateOptions(
-  sessionId: string,
-  throwIndex: number,
-  profile: ReturnType<typeof useBoardCalibrationEditor>['profile'],
+function createCandidateOptionsFromResult(
+  result: Extract<ReturnType<typeof analyzeImageDifference>, { status: 'candidate' }>,
 ): CandidatePanelOption[] {
-  const replay = createReplayDifferenceFrames({
-    changedX: 0.5,
-    changedY: profile.centerY - profile.outerRadius * 0.58,
-  });
-  const result = analyzeImageDifference({
-    sessionId,
-    cameraNodeId: 'local-count-up-camera',
-    throwIndex,
-    baselineFrame: replay.baselineFrame,
-    thrownFrame: replay.thrownFrame,
-    calibration: profile,
-    now: new Date('2026-07-17T00:00:00.000Z'),
-  });
-  const primary =
-    result.status === 'candidate'
-      ? result.candidate
-      : detectionEngine.createCandidate({
-          sessionId,
-          cameraNodeId: 'local-count-up-camera',
-          throwIndex,
-          segment: 20,
-          multiplier: 3,
-          confidence: 0.72,
-          normalizedX: 0.5,
-          normalizedY: 0.2,
-        });
+  return [result.candidate, ...result.alternateCandidates].slice(0, 3).map((candidate, index) => ({
+    label: ['第一候補', '第二候補', '第三候補'][index] ?? `候補${index + 1}`,
+    candidate,
+    reason: `実カメラframe absdiff / changed ${(result.changedPixelRatio * 100).toFixed(1)}%`,
+  }));
+}
 
-  const secondPoint = scoreCanonicalPoint(
-    {
-      x: profile.centerX,
-      y: profile.centerY - profile.outerRadius * 0.42,
-    },
-    profile,
+function InfoRow({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={styles.infoRow}>
+      <Text style={styles.infoLabel}>{label}</Text>
+      <Text style={styles.infoValue}>{value}</Text>
+    </View>
   );
-  const thirdPoint = scoreCanonicalPoint({ x: profile.centerX, y: profile.centerY }, profile);
+}
 
-  return [
-    { label: '第一候補', candidate: primary, reason: 'absdiff最大領域 + calibration profile' },
-    {
-      label: '第二候補',
-      reason: '隣接候補',
-      candidate: detectionEngine.createCandidate({
-        sessionId,
-        cameraNodeId: 'local-count-up-camera',
-        throwIndex,
-        segment: (secondPoint.segmentNumber ?? 20) as 20,
-        multiplier: secondPoint.multiplier === 0 ? 1 : secondPoint.multiplier,
-        confidence: 0.68,
-        normalizedX: secondPoint.normalizedX,
-        normalizedY: secondPoint.normalizedY,
-      }),
-    },
-    {
-      label: '第三候補',
-      reason: 'Bull fallback',
-      candidate: detectionEngine.createCandidate({
-        sessionId,
-        cameraNodeId: 'local-count-up-camera',
-        throwIndex,
-        segment: 25,
-        multiplier: thirdPoint.area === 'inner_bull' ? 2 : 1,
-        confidence: 0.61,
-        normalizedX: thirdPoint.normalizedX,
-        normalizedY: thirdPoint.normalizedY,
-      }),
-    },
-  ];
+function formatDetectionState(state: DetectionState) {
+  switch (state) {
+    case 'disabled':
+      return '自動判定OFF';
+    case 'camera_not_ready':
+      return 'カメラ準備中';
+    case 'baseline_capturing':
+      return '基準画像を取得中';
+    case 'waiting_throw':
+      return '投擲待機中';
+    case 'motion_detected':
+      return '動きを検出';
+    case 'waiting_stable':
+      return '静止待ち';
+    case 'analyzing':
+      return '判定中';
+    case 'candidate_ready':
+    case 'waiting_confirmation':
+      return '候補確認待ち';
+    case 'baseline_updating':
+      return '次投を待機中';
+    case 'paused':
+      return '一時停止中';
+    case 'error':
+      return '確認が必要';
+  }
 }
 
 function formatDart(area: DartArea, segmentNumber: number | null) {
@@ -635,6 +926,27 @@ const styles = StyleSheet.create({
   actionGrid: {
     gap: 10,
     marginTop: 12,
+  },
+  statusGrid: {
+    gap: 8,
+    marginTop: 10,
+  },
+  infoRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  infoLabel: {
+    color: colors.textMuted,
+    fontSize: 12,
+    fontWeight: '900',
+  },
+  infoValue: {
+    flex: 1,
+    color: colors.text,
+    fontSize: 12,
+    fontWeight: '900',
+    textAlign: 'right',
   },
   meta: {
     color: colors.textMuted,

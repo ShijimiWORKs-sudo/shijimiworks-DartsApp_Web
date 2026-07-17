@@ -108,6 +108,13 @@ export type TestDetectionCandidate = LanCameraBaseMessage & {
 
 export type DetectionCandidate = Omit<TestDetectionCandidate, 'type'> & {
   type: 'detection_candidate';
+  baselineFrameId?: string;
+  changedPixelRatio?: number;
+  boundingBox?: { x: number; y: number; width: number; height: number } | null;
+  reason?: string;
+  alternateCandidateIds?: string[];
+  calibrationProfileId?: string;
+  algorithmVersion?: string;
 };
 
 export type DetectionAccepted = LanCameraBaseMessage & {

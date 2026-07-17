@@ -18,6 +18,7 @@ type CandidateConfirmationPanelProps = {
   onSelect: (index: number) => void;
   onConfirm: (index: number) => void;
   onCorrect: () => void;
+  onReject: () => void;
   onMiss: () => void;
   onCaptureBaseline: () => void;
   onAnalyzeCurrentFrame: () => void;
@@ -31,6 +32,7 @@ export function CandidateConfirmationPanel({
   onSelect,
   onConfirm,
   onCorrect,
+  onReject,
   onMiss,
   onCaptureBaseline,
   onAnalyzeCurrentFrame,
@@ -86,6 +88,12 @@ export function CandidateConfirmationPanel({
         <AppButton
           label="位置を修正"
           onPress={onCorrect}
+          disabled={disabled || !selected}
+          variant="secondary"
+        />
+        <AppButton
+          label="拒否"
+          onPress={onReject}
           disabled={disabled || !selected}
           variant="secondary"
         />
