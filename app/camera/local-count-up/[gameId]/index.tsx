@@ -23,7 +23,9 @@ import { useBoardCalibrationEditor } from '../../../../features/camera/calibrati
 import { analyzeImageDifference } from '../../../../features/camera/detection/application/BasicImageDifferenceScoring';
 import { CameraLocalCountUpAdapter } from '../../../../features/camera/detection/application/CameraLocalCountUpAdapter';
 import {
-  analyzeFrameMotion,
+  analyzePersistentBoardDifference,
+  analyzeTemporalMotion,
+  resizeAnalysisFrame,
   throwDetectionThresholds,
   toGrayscaleFrame,
   type CameraAnalysisFrame,
@@ -47,6 +49,8 @@ const localCameraNodeId = 'local-count-up-camera';
 const baselineRetryLimit = 3;
 const baselineRetryBackoffMs = 1000;
 const captureTimeoutMs = 8000;
+const monitorFrameMaxSize = throwDetectionThresholds.monitorMaxSize;
+const analysisFrameMaxSize = throwDetectionThresholds.analysisMaxSize;
 
 export default function CameraLocalCountUpPlayScreen() {
   const router = useRouter();
@@ -79,17 +83,26 @@ export default function CameraLocalCountUpPlayScreen() {
   );
   const [autoMonitorEnabled, setAutoMonitorEnabled] = useState(autoDetection);
   const [baselineFrameId, setBaselineFrameId] = useState<string | null>(null);
-  const [motionAnalysis, setMotionAnalysis] = useState<MotionAnalysis | null>(null);
+  const [temporalAnalysis, setTemporalAnalysis] = useState<MotionAnalysis | null>(null);
+  const [persistentAnalysis, setPersistentAnalysis] = useState<MotionAnalysis | null>(null);
   const [stableStartedAt, setStableStartedAt] = useState<number | null>(null);
   const [lastProcessingMs, setLastProcessingMs] = useState<number | null>(null);
   const [monitorError, setMonitorError] = useState<{ code: string; message: string } | null>(null);
+  const [motionSeen, setMotionSeen] = useState(false);
+  const [persistentChangeSeen, setPersistentChangeSeen] = useState(false);
+  const [lastTransitionReason, setLastTransitionReason] = useState('initializing');
   const baselineFrameRef = useRef<CameraAnalysisFrame | null>(null);
+  const baselineMonitorFrameRef = useRef<CameraAnalysisFrame | null>(null);
+  const previousFrameRef = useRef<CameraAnalysisFrame | null>(null);
+  const lastStableFrameRef = useRef<CameraAnalysisFrame | null>(null);
   const pendingThrownFrameRef = useRef<CameraAnalysisFrame | null>(null);
   const monitorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const monitorInFlightRef = useRef(false);
   const monitorGenerationRef = useRef(0);
   const mountedRef = useRef(false);
   const stableStartedAtRef = useRef<number | null>(null);
+  const motionSeenSinceBaselineRef = useRef(false);
+  const persistentChangeSeenRef = useRef(false);
   const baselineRetryCountRef = useRef(0);
   const baselineRetryBlockedUntilRef = useRef(0);
   const capturePictureRef = useRef(cameraSession.capturePicture);
@@ -146,18 +159,44 @@ export default function CameraLocalCountUpPlayScreen() {
     }
   }, []);
 
-  const clearBaseline = useCallback((message: string) => {
-    baselineFrameRef.current = null;
-    pendingThrownFrameRef.current = null;
-    setBaselineFrameId(null);
+  const resetThrowDetectionRefs = useCallback((frame?: CameraAnalysisFrame | null) => {
+    if (frame) {
+      const monitorFrame = resizeAnalysisFrame(frame, monitorFrameMaxSize);
+      baselineMonitorFrameRef.current = monitorFrame;
+      previousFrameRef.current = monitorFrame;
+      lastStableFrameRef.current = monitorFrame;
+    } else {
+      baselineMonitorFrameRef.current = null;
+      previousFrameRef.current = null;
+      lastStableFrameRef.current = null;
+    }
+    motionSeenSinceBaselineRef.current = false;
+    persistentChangeSeenRef.current = false;
     stableStartedAtRef.current = null;
+    setMotionSeen(false);
+    setPersistentChangeSeen(false);
     setStableStartedAt(null);
-    setMotionAnalysis(null);
-    setCandidateOptions([]);
-    setCandidateMessage(message);
-    setDetectionState('paused');
-    setMonitorError(null);
+    setTemporalAnalysis(null);
+    setPersistentAnalysis(null);
   }, []);
+
+  const clearBaseline = useCallback(
+    (message: string) => {
+      baselineFrameRef.current = null;
+      baselineMonitorFrameRef.current = null;
+      previousFrameRef.current = null;
+      lastStableFrameRef.current = null;
+      pendingThrownFrameRef.current = null;
+      setBaselineFrameId(null);
+      resetThrowDetectionRefs(null);
+      setCandidateOptions([]);
+      setCandidateMessage(message);
+      setDetectionState('paused');
+      setMonitorError(null);
+      setLastTransitionReason('baseline cleared');
+    },
+    [resetThrowDetectionRefs],
+  );
 
   const loadGame = useCallback(async () => {
     if (!adapter || !gameId) {
@@ -277,22 +316,23 @@ export default function CameraLocalCountUpPlayScreen() {
       setCandidateMessage('基準画像を取得中です。');
       try {
         logMonitor('capture start', { kind: 'baseline' });
-        const frame = await captureFrameWithTimeout(frameSource);
+        const frame = await captureFrameWithTimeout(frameSource, {
+          maxSize: analysisFrameMaxSize,
+        });
         logMonitor('capture end', { kind: 'baseline', frameId: frame.frameId });
         if (!mountedRef.current) {
           return;
         }
         baselineFrameRef.current = frame;
         pendingThrownFrameRef.current = null;
+        resetThrowDetectionRefs(frame);
         baselineRetryCountRef.current = 0;
         baselineRetryBlockedUntilRef.current = 0;
         setBaselineFrameId(frame.frameId);
-        stableStartedAtRef.current = null;
-        setStableStartedAt(null);
-        setMotionAnalysis(null);
         setCandidateOptions([]);
         setLastProcessingMs(null);
         setMonitorError(null);
+        setLastTransitionReason('baseline captured');
         setDetectionState('waiting_throw');
         setCandidateMessage('基準画像を取得しました。投擲待機中です。');
       } catch (error) {
@@ -321,11 +361,11 @@ export default function CameraLocalCountUpPlayScreen() {
         }
       }
     },
-    [autoDetection, calibrationEditor.status, cameraReady],
+    [autoDetection, calibrationEditor.status, cameraReady, resetThrowDetectionRefs],
   );
 
   const detectThrow = useCallback(
-    async (options?: { manual?: boolean }) => {
+    async (options?: { manual?: boolean; thrownFrame?: CameraAnalysisFrame }) => {
       if (options?.manual && monitorInFlightRef.current) {
         const concurrentError = {
           code: 'CONCURRENT_CAPTURE_BLOCKED',
@@ -381,7 +421,11 @@ export default function CameraLocalCountUpPlayScreen() {
       setCandidateMessage('判定中です。');
       try {
         logMonitor('capture start', { kind: 'throw' });
-        const thrownFrame = await captureFrameWithTimeout(frameSource);
+        const thrownFrame =
+          options?.thrownFrame ??
+          (await captureFrameWithTimeout(frameSource, {
+            maxSize: analysisFrameMaxSize,
+          }));
         logMonitor('capture end', { kind: 'throw', frameId: thrownFrame.frameId });
         if (!mountedRef.current || !baselineFrameRef.current) {
           return;
@@ -410,13 +454,31 @@ export default function CameraLocalCountUpPlayScreen() {
 
         pendingThrownFrameRef.current = null;
         setCandidateOptions([]);
-        setDetectionState('error');
-        setMonitorError({
-          code: result.reason,
-          message: '候補を生成できませんでした。',
-        });
+        if (result.reason === 'NO_SIGNIFICANT_CHANGE' && !options?.manual) {
+          motionSeenSinceBaselineRef.current = false;
+          persistentChangeSeenRef.current = false;
+          setMotionSeen(false);
+          setPersistentChangeSeen(false);
+          setDetectionState('waiting_throw');
+          setMonitorError(null);
+          setLastTransitionReason('no persistent candidate');
+          setCandidateMessage('投擲を待機しています。');
+          return;
+        }
+
+        setDetectionState(options?.manual ? 'waiting_throw' : 'error');
+        setMonitorError(
+          options?.manual
+            ? null
+            : {
+                code: result.reason,
+                message: '候補を生成できませんでした。',
+              },
+        );
         setCandidateMessage(
-          `候補を生成できませんでした（${result.reason}）。基準画像を再取得するか手動入力で続行してください。`,
+          options?.manual && result.reason === 'NO_SIGNIFICANT_CHANGE'
+            ? '盤面に有意な変化がありません。'
+            : `候補を生成できませんでした（${result.reason}）。基準画像を再取得するか手動入力で続行してください。`,
         );
       } catch (error) {
         console.warn('Throw frame analysis failed', error);
@@ -461,7 +523,11 @@ export default function CameraLocalCountUpPlayScreen() {
 
       monitorInFlightRef.current = true;
       try {
-        if (!baselineFrameRef.current) {
+        if (
+          !baselineFrameRef.current ||
+          !baselineMonitorFrameRef.current ||
+          !previousFrameRef.current
+        ) {
           await captureBaseline();
           return;
         }
@@ -472,20 +538,34 @@ export default function CameraLocalCountUpPlayScreen() {
         }
 
         logMonitor('capture start', { kind: 'monitor', generation });
-        const currentFrame = await captureFrameWithTimeout(frameSource);
+        const currentFrame = await captureFrameWithTimeout(frameSource, {
+          maxSize: monitorFrameMaxSize,
+        });
         logMonitor('capture end', { kind: 'monitor', generation, frameId: currentFrame.frameId });
         if (!mountedRef.current || generation !== monitorGenerationRef.current) {
           return;
         }
 
-        const motion = analyzeFrameMotion({
-          baselineFrame: baselineFrameRef.current,
+        const temporal = analyzeTemporalMotion({
+          previousFrame: previousFrameRef.current,
           currentFrame,
           calibration: calibrationEditor.profile,
         });
-        setMotionAnalysis(motion);
+        const persistent = analyzePersistentBoardDifference({
+          baselineFrame: baselineMonitorFrameRef.current,
+          currentFrame,
+          calibration: calibrationEditor.profile,
+        });
+        setTemporalAnalysis(temporal);
+        setPersistentAnalysis(persistent);
+        persistentChangeSeenRef.current =
+          persistentChangeSeenRef.current || persistent.hasPersistentChange;
+        setPersistentChangeSeen(persistentChangeSeenRef.current);
 
-        if (motion.reason === 'frame_size_mismatch') {
+        if (
+          temporal.reason === 'frame_size_mismatch' ||
+          persistent.reason === 'frame_size_mismatch'
+        ) {
           setDetectionState('error');
           setMonitorError({
             code: 'FRAME_SIZE_MISMATCH',
@@ -495,47 +575,89 @@ export default function CameraLocalCountUpPlayScreen() {
           return;
         }
 
-        if (motion.reason === 'obstruction') {
+        if (temporal.reason === 'obstruction') {
+          motionSeenSinceBaselineRef.current = true;
+          setMotionSeen(true);
           setDetectionState('waiting_stable');
+          setLastTransitionReason('obstruction');
           stableStartedAtRef.current = null;
           setStableStartedAt(null);
+          previousFrameRef.current = currentFrame;
           setCandidateMessage(
             '大きな動きを検出しました。手や身体が映らなくなるまで待機しています。',
           );
           return;
         }
 
-        if (motion.reason === 'motion') {
+        if (temporal.reason === 'motion') {
+          motionSeenSinceBaselineRef.current = true;
+          setMotionSeen(true);
           setDetectionState('motion_detected');
+          setLastTransitionReason('temporal motion');
           stableStartedAtRef.current = null;
           setStableStartedAt(null);
+          previousFrameRef.current = currentFrame;
           setCandidateMessage('動きを検出しました。静止待ちです。');
           return;
         }
 
-        if (motion.reason === 'stable') {
+        if (!motionSeenSinceBaselineRef.current) {
+          stableStartedAtRef.current = null;
+          setStableStartedAt(null);
+          previousFrameRef.current = currentFrame;
+          lastStableFrameRef.current = currentFrame;
+          setDetectionState('waiting_throw');
+          setLastTransitionReason('no temporal motion');
+          setCandidateMessage('投擲を待機しています。');
+          return;
+        }
+
+        if (temporal.reason === 'stable') {
           const now = Date.now();
           const startedAt = stableStartedAtRef.current ?? now;
           stableStartedAtRef.current = startedAt;
           setStableStartedAt(startedAt);
           const stableMs = now - startedAt;
-          setDetectionState(
-            stableMs >= throwDetectionThresholds.stableDurationMs ? 'analyzing' : 'waiting_stable',
-          );
+          setDetectionState('waiting_stable');
+          setLastTransitionReason('temporal stable');
           setCandidateMessage(
             stableMs >= throwDetectionThresholds.stableDurationMs
-              ? '静止しました。判定中です。'
+              ? '静止しました。盤面差分を確認しています。'
               : '静止待ちです。',
           );
           if (stableMs >= throwDetectionThresholds.stableDurationMs) {
-            await detectThrow();
+            lastStableFrameRef.current = currentFrame;
+            if (persistentChangeSeenRef.current) {
+              setDetectionState('analyzing');
+              setLastTransitionReason('motion and persistent change');
+              const analysisFrame = await captureFrameWithTimeout(frameSource, {
+                maxSize: analysisFrameMaxSize,
+              });
+              await detectThrow({ thrownFrame: analysisFrame });
+              previousFrameRef.current = currentFrame;
+              return;
+            }
+
+            motionSeenSinceBaselineRef.current = false;
+            persistentChangeSeenRef.current = false;
+            setMotionSeen(false);
+            setPersistentChangeSeen(false);
+            stableStartedAtRef.current = null;
+            setStableStartedAt(null);
+            previousFrameRef.current = currentFrame;
+            setDetectionState('waiting_throw');
+            setMonitorError(null);
+            setLastTransitionReason('motion without persistent change');
+            setCandidateMessage('投擲を待機しています。');
           }
           return;
         }
 
         stableStartedAtRef.current = null;
         setStableStartedAt(null);
+        previousFrameRef.current = currentFrame;
         setDetectionState('waiting_throw');
+        setLastTransitionReason('temporal idle');
       } catch (error) {
         console.warn('Automatic throw monitor failed', error);
         if (mountedRef.current) {
@@ -643,13 +765,12 @@ export default function CameraLocalCountUpPlayScreen() {
         if (pendingThrownFrameRef.current) {
           baselineFrameRef.current = pendingThrownFrameRef.current;
           setBaselineFrameId(pendingThrownFrameRef.current.frameId);
+          resetThrowDetectionRefs(pendingThrownFrameRef.current);
           pendingThrownFrameRef.current = null;
           setDetectionState('waiting_throw');
+          setLastTransitionReason('candidate confirmed baseline promoted');
         }
         setCandidateOptions([]);
-        stableStartedAtRef.current = null;
-        setStableStartedAt(null);
-        setMotionAnalysis(null);
         setMonitorError(null);
         setCandidateMessage('候補を確定しました。次の投擲待機中です。');
         return nextGame;
@@ -661,6 +782,7 @@ export default function CameraLocalCountUpPlayScreen() {
       clearRedoSession,
       game,
       inputDisabled,
+      resetThrowDetectionRefs,
       runAction,
       selectedCandidateIndex,
     ],
@@ -809,15 +931,40 @@ export default function CameraLocalCountUpPlayScreen() {
               <InfoRow label="base64" value={baselineFrameRef.current?.base64Kind ?? '-'} />
               <InfoRow label="decode" value={baselineFrameRef.current?.decodeStatus ?? '-'} />
               <InfoRow
-                label="変化量"
+                label="時間差分"
                 value={
-                  motionAnalysis ? `${(motionAnalysis.changedPixelRatio * 100).toFixed(1)}%` : '-'
+                  temporalAnalysis
+                    ? `${(temporalAnalysis.changedPixelRatio * 100).toFixed(1)}%`
+                    : '-'
                 }
+              />
+              <InfoRow
+                label="盤面差分"
+                value={
+                  persistentAnalysis
+                    ? `${(persistentAnalysis.changedPixelRatio * 100).toFixed(1)}%`
+                    : '-'
+                }
+              />
+              <InfoRow label="motion seen" value={motionSeen ? 'yes' : 'no'} />
+              <InfoRow label="persistent change" value={persistentChangeSeen ? 'yes' : 'no'} />
+              <InfoRow
+                label="temporal pixels"
+                value={temporalAnalysis ? String(temporalAnalysis.changedPixelCount) : '-'}
+              />
+              <InfoRow
+                label="persistent pixels"
+                value={persistentAnalysis ? String(persistentAnalysis.changedPixelCount) : '-'}
               />
               <InfoRow
                 label="静止時間"
                 value={stableStartedAt ? `${Date.now() - stableStartedAt}ms` : '-'}
               />
+              <InfoRow
+                label="analysis resolution"
+                value={`${monitorFrameMaxSize}/${analysisFrameMaxSize}`}
+              />
+              <InfoRow label="transition" value={lastTransitionReason} />
               <InfoRow label="処理時間" value={lastProcessingMs ? `${lastProcessingMs}ms` : '-'} />
               <InfoRow label="エラー" value={monitorError ? monitorError.code : '-'} />
             </View>
@@ -867,9 +1014,17 @@ export default function CameraLocalCountUpPlayScreen() {
               onReject={() => {
                 pendingThrownFrameRef.current = null;
                 setCandidateOptions([]);
+                if (lastStableFrameRef.current) {
+                  previousFrameRef.current = lastStableFrameRef.current;
+                }
+                motionSeenSinceBaselineRef.current = false;
+                persistentChangeSeenRef.current = false;
+                setMotionSeen(false);
+                setPersistentChangeSeen(false);
                 stableStartedAtRef.current = null;
                 setStableStartedAt(null);
                 setDetectionState('waiting_throw');
+                setLastTransitionReason('candidate rejected baseline kept');
                 setCandidateMessage(
                   '候補を拒否しました。基準画像は更新していません。再解析または手動入力を選んでください。',
                 );
@@ -1017,11 +1172,14 @@ function createCandidateOptionsFromResult(
   }));
 }
 
-async function captureFrameWithTimeout(frameSource: CameraFrameSource) {
+async function captureFrameWithTimeout(
+  frameSource: CameraFrameSource,
+  options?: { maxSize?: number },
+) {
   let timeout: ReturnType<typeof setTimeout> | null = null;
   try {
     return await Promise.race([
-      frameSource.captureFrame(),
+      frameSource.captureFrame(options),
       new Promise<never>((_, reject) => {
         timeout = setTimeout(() => reject(new Error('CAPTURE_TIMEOUT')), captureTimeoutMs);
       }),

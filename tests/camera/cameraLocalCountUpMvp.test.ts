@@ -86,10 +86,11 @@ test('camera COUNT-UP production route uses real frame source instead of replay 
   const play = readRepoFile('app/camera/local-count-up/[gameId]/index.tsx');
 
   assert.match(play, /WebCameraFrameSource/);
-  assert.match(play, /frameSource\.captureFrame\(\)/);
+  assert.match(play, /frameSource\.captureFrame\(options\)/);
   assert.match(play, /baselineFrameRef/);
   assert.match(play, /pendingThrownFrameRef/);
-  assert.match(play, /analyzeFrameMotion/);
+  assert.match(play, /analyzeTemporalMotion/);
+  assert.match(play, /analyzePersistentBoardDifference/);
   assert.match(play, /analyzeImageDifference/);
   assert.match(play, /toGrayscaleFrame\(baselineFrameRef\.current\)/);
   assert.doesNotMatch(play, /createReplayDifferenceFrames/);
@@ -115,7 +116,10 @@ test('camera COUNT-UP automatic detection exposes state machine and loop control
   }
 
   assert.match(play, /自動判定状態/);
-  assert.match(play, /変化量/);
+  assert.match(play, /時間差分/);
+  assert.match(play, /盤面差分/);
+  assert.match(play, /motion seen/);
+  assert.match(play, /persistent change/);
   assert.match(play, /静止時間/);
   assert.match(play, /処理時間/);
   assert.match(play, /自動監視開始/);
@@ -124,6 +128,35 @@ test('camera COUNT-UP automatic detection exposes state machine and loop control
   assert.match(play, /stopMonitorLoop/);
   assert.match(play, /monitorInFlightRef/);
   assert.match(play, /setTimeout\(tick, throwDetectionThresholds\.frameIntervalMs\)/);
+});
+
+test('camera COUNT-UP monitor requires temporal motion before persistent throw analysis', () => {
+  const play = readRepoFile('app/camera/local-count-up/[gameId]/index.tsx');
+  const processMonitorFrameBlock = extractConstBlock(play, 'processMonitorFrame');
+
+  assert.match(play, /previousFrameRef/);
+  assert.match(play, /motionSeenSinceBaselineRef/);
+  assert.match(play, /persistentChangeSeenRef/);
+  assert.match(play, /lastStableFrameRef/);
+  assert.match(processMonitorFrameBlock, /analyzeTemporalMotion/);
+  assert.match(processMonitorFrameBlock, /analyzePersistentBoardDifference/);
+  assert.match(processMonitorFrameBlock, /!motionSeenSinceBaselineRef\.current/);
+  assert.match(processMonitorFrameBlock, /setLastTransitionReason\('no temporal motion'\)/);
+  assert.match(processMonitorFrameBlock, /persistentChangeSeenRef\.current/);
+  assert.match(processMonitorFrameBlock, /detectThrow\(\{ thrownFrame: analysisFrame \}\)/);
+});
+
+test('camera COUNT-UP monitor uses two stage resolution and treats no significant change as nonfatal', () => {
+  const play = readRepoFile('app/camera/local-count-up/[gameId]/index.tsx');
+
+  assert.match(play, /monitorFrameMaxSize = throwDetectionThresholds\.monitorMaxSize/);
+  assert.match(play, /analysisFrameMaxSize = throwDetectionThresholds\.analysisMaxSize/);
+  assert.match(play, /maxSize: monitorFrameMaxSize/);
+  assert.match(play, /maxSize: analysisFrameMaxSize/);
+  assert.match(play, /result\.reason === 'NO_SIGNIFICANT_CHANGE' && !options\?\.manual/);
+  assert.match(play, /setDetectionState\('waiting_throw'\)/);
+  assert.match(play, /投擲を待機しています。/);
+  assert.doesNotMatch(play, /NO_SIGNIFICANT_CHANGE'[\s\S]{0,160}setDetectionState\('error'\)/);
 });
 
 test('camera COUNT-UP monitor lifecycle does not depend on capture in-progress state', () => {

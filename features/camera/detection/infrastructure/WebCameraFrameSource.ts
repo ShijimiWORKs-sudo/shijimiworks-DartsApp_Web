@@ -14,7 +14,7 @@ type WebCameraFrameSourceDependencies = {
 export class WebCameraFrameSource implements CameraFrameSource {
   constructor(private readonly dependencies: WebCameraFrameSourceDependencies) {}
 
-  async captureFrame(): Promise<CameraAnalysisFrame> {
+  async captureFrame(options?: { maxSize?: number }): Promise<CameraAnalysisFrame> {
     const image = await this.dependencies.captureImage();
     if (!image) {
       throw new Error('CAMERA_FRAME_UNAVAILABLE');
@@ -33,7 +33,7 @@ export class WebCameraFrameSource implements CameraFrameSource {
       capturedHeight: image.height,
       uriPrefixKind: normalized.uriPrefixKind,
       base64Kind: normalized.base64Kind,
-      maxSize: this.dependencies.maxSize ?? 96,
+      maxSize: options?.maxSize ?? this.dependencies.maxSize ?? 320,
     });
   }
 }

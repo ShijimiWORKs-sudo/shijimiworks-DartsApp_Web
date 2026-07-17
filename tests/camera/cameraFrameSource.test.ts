@@ -2,7 +2,10 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import {
+  analyzePersistentBoardDifference,
   analyzeFrameMotion,
+  analyzeTemporalMotion,
+  resizeAnalysisFrame,
   throwDetectionThresholds,
   type CameraAnalysisFrame,
 } from '../../features/camera/detection/application/CameraFrameSource';
@@ -34,7 +37,7 @@ test('motion analysis detects throw movement and obstruction inside calibration 
   });
 
   assert.equal(result.reason, 'motion');
-  assert.ok(result.changedPixelRatio >= throwDetectionThresholds.motionStartRatio);
+  assert.ok(result.changedPixelRatio >= throwDetectionThresholds.temporalMotionStartRatio);
   assert.ok(result.boundingBox);
 
   const obstruction = createFrame('obstruction', 40, 40, 255);
@@ -58,7 +61,69 @@ test('motion analysis returns stable when frame difference is below stable thres
   });
 
   assert.equal(result.reason, 'stable');
-  assert.ok(result.changedPixelRatio <= throwDetectionThresholds.stableRatio);
+  assert.ok(result.changedPixelRatio <= throwDetectionThresholds.temporalStableRatio);
+});
+
+test('temporal and persistent analysis are separated for throw detection', () => {
+  const profile = createDefaultCalibrationProfile();
+  const baseline = createFrame('baseline', 160, 120);
+  const unchanged = createFrame('unchanged', 160, 120);
+  const handMotion = createFrame('hand-motion', 160, 120);
+  const dartStuck = createFrame('dart-stuck', 160, 120);
+
+  for (let y = 52; y <= 68; y += 1) {
+    for (let x = 70; x <= 90; x += 1) {
+      handMotion.grayPixels[y * 160 + x] = 255;
+    }
+  }
+  for (let y = 42; y <= 68; y += 1) {
+    dartStuck.grayPixels[y * 160 + 82] = 255;
+  }
+
+  const quietTemporal = analyzeTemporalMotion({
+    previousFrame: baseline,
+    currentFrame: unchanged,
+    calibration: profile,
+  });
+  const quietPersistent = analyzePersistentBoardDifference({
+    baselineFrame: baseline,
+    currentFrame: unchanged,
+    calibration: profile,
+  });
+  assert.equal(quietTemporal.reason, 'stable');
+  assert.equal(quietPersistent.hasPersistentChange, false);
+
+  const movingTemporal = analyzeTemporalMotion({
+    previousFrame: baseline,
+    currentFrame: handMotion,
+    calibration: profile,
+  });
+  assert.equal(movingTemporal.reason, 'motion');
+
+  const stuckTemporal = analyzeTemporalMotion({
+    previousFrame: dartStuck,
+    currentFrame: dartStuck,
+    calibration: profile,
+  });
+  const stuckPersistent = analyzePersistentBoardDifference({
+    baselineFrame: baseline,
+    currentFrame: dartStuck,
+    calibration: profile,
+  });
+  assert.equal(stuckTemporal.reason, 'stable');
+  assert.equal(stuckPersistent.hasPersistentChange, true);
+  assert.ok(stuckPersistent.largestComponentPixels >= 3);
+});
+
+test('resizeAnalysisFrame supports high resolution final analysis and monitor resolution', () => {
+  const source = createFrame('source', 640, 480);
+  const monitor = resizeAnalysisFrame(source, throwDetectionThresholds.monitorMaxSize);
+  const analysis = resizeAnalysisFrame(source, throwDetectionThresholds.analysisMaxSize);
+
+  assert.equal(monitor.width, 160);
+  assert.equal(monitor.height, 120);
+  assert.equal(analysis.width, 320);
+  assert.equal(analysis.height, 240);
 });
 
 test('web image decode converts JPEG and PNG fixtures through canvas', async () => {
