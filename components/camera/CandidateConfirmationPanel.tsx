@@ -125,6 +125,29 @@ export function CandidateConfirmationPanel({
                 {selectedDiagnostics.componentDiagnostics.skeletonLength.toFixed(1)}
               </Text>
               <Text style={styles.meta}>
+                max width {selectedDiagnostics.componentDiagnostics.maxWidth?.toFixed(1) ?? '-'} /
+                max gradient{' '}
+                {selectedDiagnostics.componentDiagnostics.maxGradient?.toFixed(1) ?? '-'} /
+                endpoints {selectedDiagnostics.componentDiagnostics.skeletonEndpointCount ?? '-'}
+              </Text>
+              {selectedDiagnostics.tipEvaluationDiagnostics?.[0] ? (
+                <Text style={styles.meta}>
+                  source tip {selectedDiagnostics.tipEvaluationDiagnostics[0].reason} / edge{' '}
+                  {selectedDiagnostics.tipEvaluationDiagnostics[0].edgeSharpness.toFixed(1)} /
+                  shadow penalty{' '}
+                  {selectedDiagnostics.tipEvaluationDiagnostics[0].shadowDirectionPenalty.toFixed(
+                    2,
+                  )}
+                </Text>
+              ) : null}
+              {selectedDiagnostics.highResolutionRoi ? (
+                <Text style={styles.meta}>
+                  high-res ROI {formatBox(selectedDiagnostics.highResolutionRoi)} / source{' '}
+                  {selectedDiagnostics.highResolutionRoi.sourceWidth}×
+                  {selectedDiagnostics.highResolutionRoi.sourceHeight}
+                </Text>
+              ) : null}
+              <Text style={styles.meta}>
                 core box {formatBox(selectedDiagnostics.narrowCoreBoundingBox)} / rejection{' '}
                 {selectedDiagnostics.componentDiagnostics.rejectionReason ?? '-'}
               </Text>

@@ -264,8 +264,68 @@ test('basic image difference ranks a clear S11 dart above an S16 shadow', () => 
     assert.ok(result.candidate.componentDiagnostics.dartLikelihood > 0.35);
     assert.ok(result.candidate.componentDiagnostics.shadowLikelihood < 0.66);
     assert.ok(result.candidate.componentDiagnostics.skeletonLength > 0);
+    assert.ok(result.candidate.componentDiagnostics.maxWidth);
+    assert.ok(result.candidate.componentDiagnostics.maxGradient);
+    assert.notEqual(result.candidate.componentDiagnostics.skeletonEndpointCount, undefined);
     assert.ok(result.candidate.narrowCoreBoundingBox);
     assert.ok(result.candidate.rejectedShadowComponents?.length);
+  }
+});
+
+test('basic image difference keeps low elongation shadow below usable confidence', () => {
+  const profile = createDefaultCalibrationProfile();
+  const baselineFrame = createLitFrame(180, 120, 180);
+  const thrownFrame = createLitFrame(180, 120, 180);
+  const s16 = scoreToApproximateBoardPoint({ area: 'single', segmentNumber: 16, profile });
+  drawBlurredShadow(thrownFrame, s16, { rx: 0.055, ry: 0.052 }, 82);
+
+  const result = analyzeImageDifference({
+    sessionId: 'low-elongation-shadow',
+    cameraNodeId: 'camera-node',
+    throwIndex: 1,
+    baselineFrame,
+    thrownFrame,
+    calibration: profile,
+    threshold: 18,
+  });
+
+  if (result.status === 'candidate') {
+    assert.ok(result.candidate.confidence < 0.3);
+  } else {
+    assert.equal(result.status, 'no_candidate');
+  }
+});
+
+test('basic image difference refines final tip from source resolution ROI', () => {
+  const profile = createDefaultCalibrationProfile();
+  const baselineFrame = createFrame(320, 240);
+  const thrownFrame = createFrame(320, 240);
+  const sourceBaselineFrame = createFrame(640, 480);
+  const sourceThrownFrame = createFrame(640, 480);
+  const s11 = scoreToApproximateBoardPoint({ area: 'single', segmentNumber: 11, profile });
+  drawSyntheticDart(thrownFrame, s11, extendOutward(profile, s11, 0.22), 245);
+  drawSyntheticDart(sourceThrownFrame, s11, extendOutward(profile, s11, 0.22), 255);
+
+  const result = analyzeImageDifference({
+    sessionId: 'source-roi',
+    cameraNodeId: 'camera-node',
+    throwIndex: 1,
+    baselineFrame,
+    thrownFrame,
+    sourceBaselineFrame,
+    sourceThrownFrame,
+    calibration: profile,
+    threshold: 20,
+  });
+
+  assert.equal(result.status, 'candidate');
+  if (result.status === 'candidate') {
+    assert.equal(result.candidate.segment, 11);
+    assert.ok(result.candidate.highResolutionRoi);
+    assert.equal(result.candidate.highResolutionRoi?.sourceWidth, 640);
+    assert.equal(result.candidate.highResolutionRoi?.sourceHeight, 480);
+    assert.match(result.candidate.componentDiagnostics?.tipSelectionReason ?? '', /source 640 roi/);
+    assert.equal(result.candidate.tipEvaluationDiagnostics?.[0].insideBoard, true);
   }
 });
 

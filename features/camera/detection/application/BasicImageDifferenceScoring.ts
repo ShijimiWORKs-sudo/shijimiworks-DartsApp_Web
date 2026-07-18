@@ -8,6 +8,12 @@ import type {
   LanCameraMultiplier,
   LanCameraSegment,
 } from '../../lan/domain/protocol';
+import { cameraShadowDetectionThresholds } from './cameraShadowDetectionThresholds';
+import {
+  refineTipAtSourceResolution,
+  type HighResolutionTipRefinement,
+  type TipEvaluation,
+} from './HighResolutionTipRefiner';
 
 export type GrayscaleFrame = {
   frameId?: string;
@@ -23,8 +29,11 @@ export type BasicImageDifferenceInput = {
   throwIndex: number;
   baselineFrame: GrayscaleFrame;
   thrownFrame: GrayscaleFrame;
+  sourceBaselineFrame?: GrayscaleFrame;
+  sourceThrownFrame?: GrayscaleFrame;
   calibration: SimpleBoardCalibration | BoardCalibrationProfile;
   threshold?: number;
+  shadowDirectionDeg?: number | null;
   now?: Date;
   random?: () => number;
 };
@@ -47,9 +56,11 @@ export type DartComponentFeature = {
   persistenceCount: number;
   boardOverlapRatio: number;
   averageWidth: number;
+  maxWidth: number;
   widthVariance: number;
   edgeSharpness: number;
   edgeDensity: number;
+  maxGradient: number;
   localContrast: number;
   gradientMagnitude: number;
   solidity: number;
@@ -59,6 +70,7 @@ export type DartComponentFeature = {
   darkeningPolarity: number;
   skeletonLength: number;
   skeletonBranchCount: number;
+  skeletonEndpointCount: number;
   dartLikelihood: number;
   shadowLikelihood: number;
   rejectionReason: string | null;
@@ -80,6 +92,8 @@ export type TipCandidateFeature = {
   reason: string;
   component: DartComponentFeature;
   boardScore: ReturnType<typeof scorePointWithCalibration>;
+  sourceRefinement?: HighResolutionTipRefinement | null;
+  tipEvaluation: TipEvaluation;
 };
 
 export type BasicImageDifferenceResult =
@@ -147,10 +161,11 @@ export function analyzeImageDifference(
 
   const rejectedShadowComponents = components.filter(
     (component) =>
-      component.shadowLikelihood >= 0.58 ||
+      component.shadowLikelihood >= cameraShadowDetectionThresholds.shadowLikelihoodMaximum ||
       (component.narrowCore.isBrightCore &&
-        component.averageWidth >= 7 &&
-        component.shadowLikelihood >= 0.34),
+        component.averageWidth >= cameraShadowDetectionThresholds.broadShadowWidth &&
+        component.shadowLikelihood >=
+          cameraShadowDetectionThresholds.strongShadowLikelihoodMaximum),
   );
   const tips = components
     .filter(isDartCandidateComponent)
@@ -449,10 +464,17 @@ function createComponentFeature(input: {
     input.frameWidth,
     input.frameHeight,
   );
+  const maxGradient = getMaxGradientMagnitude(
+    input.pixels,
+    input.deltas,
+    input.frameWidth,
+    input.frameHeight,
+  );
   const averageDelta = input.pixels.reduce((total, pixel) => total + pixel.delta, 0) / area;
   const deltaVariance = variance(input.pixels.map((pixel) => pixel.delta));
   const averageWidth = area / Math.max(1, majorAxisLength);
-  const widthVariance = calculateWidthVariance(input.pixels, centroid, axis.vector);
+  const widthStats = calculateWidthStats(input.pixels, centroid, axis.vector);
+  const widthVariance = widthStats.widthVariance;
   const solidity = area / Math.max(1, bboxArea);
   const compactness = (4 * Math.PI * area) / Math.max(1, boundaryPixels.length ** 2);
   const darkeningPolarity = getDarkeningPolarity(input.pixels, input.input, input.frameWidth);
@@ -465,16 +487,20 @@ function createComponentFeature(input: {
     maxDelta: Math.max(...input.pixels.map((pixel) => pixel.delta)),
   });
   const skeletonLength = narrowCore.majorAxisLength;
-  const skeletonBranchCount = estimateSkeletonBranchCount(narrowCore.pixels, input.frameWidth);
+  const skeletonTopology = estimateSkeletonTopology(narrowCore.pixels, input.frameWidth);
+  const skeletonBranchCount = skeletonTopology.branchCount;
+  const skeletonEndpointCount = skeletonTopology.endpointCount;
   const likelihood = classifyComponent({
     area,
     majorAxisLength,
     minorAxisLength: area / Math.max(1, majorAxisLength),
     elongation: majorAxisLength / Math.max(1, area / Math.max(1, majorAxisLength)),
     averageWidth,
+    maxWidth: widthStats.maxWidth,
     widthVariance,
     edgeSharpness,
     edgeDensity,
+    maxGradient,
     localContrast: averageDelta - input.threshold,
     gradientMagnitude,
     solidity,
@@ -484,6 +510,7 @@ function createComponentFeature(input: {
     darkeningPolarity,
     skeletonLength,
     skeletonBranchCount,
+    skeletonEndpointCount,
     boardOverlapRatio: roiPixels / area,
     bboxAreaRatio: bboxArea / Math.max(1, input.frameWidth * input.frameHeight),
   });
@@ -518,9 +545,11 @@ function createComponentFeature(input: {
     persistenceCount: 1,
     boardOverlapRatio: roiPixels / area,
     averageWidth,
+    maxWidth: widthStats.maxWidth,
     widthVariance,
     edgeSharpness,
     edgeDensity,
+    maxGradient,
     localContrast: averageDelta - input.threshold,
     gradientMagnitude,
     solidity,
@@ -530,6 +559,7 @@ function createComponentFeature(input: {
     darkeningPolarity,
     skeletonLength,
     skeletonBranchCount,
+    skeletonEndpointCount,
     dartLikelihood,
     shadowLikelihood,
     rejectionReason,
@@ -619,6 +649,23 @@ function getAverageGradientMagnitude(
   return total / pixels.length;
 }
 
+function getMaxGradientMagnitude(
+  pixels: { x: number; y: number }[],
+  deltas: Uint8Array,
+  frameWidth: number,
+  frameHeight: number,
+) {
+  let maxGradient = 0;
+  for (const pixel of pixels) {
+    const left = deltas[pixel.y * frameWidth + Math.max(0, pixel.x - 1)];
+    const right = deltas[pixel.y * frameWidth + Math.min(frameWidth - 1, pixel.x + 1)];
+    const top = deltas[Math.max(0, pixel.y - 1) * frameWidth + pixel.x];
+    const bottom = deltas[Math.min(frameHeight - 1, pixel.y + 1) * frameWidth + pixel.x];
+    maxGradient = Math.max(maxGradient, Math.sqrt((right - left) ** 2 + (bottom - top) ** 2));
+  }
+  return maxGradient;
+}
+
 function variance(values: number[]) {
   if (values.length === 0) {
     return 0;
@@ -627,7 +674,7 @@ function variance(values: number[]) {
   return values.reduce((total, value) => total + (value - average) ** 2, 0) / values.length;
 }
 
-function calculateWidthVariance(
+function calculateWidthStats(
   pixels: { x: number; y: number }[],
   centroid: { x: number; y: number },
   axisVector: { x: number; y: number },
@@ -644,7 +691,10 @@ function calculateWidthVariance(
     buckets.set(projection, values);
   }
   const widths = Array.from(buckets.values()).map((values) => Math.max(...values) * 2 + 1);
-  return variance(widths);
+  return {
+    maxWidth: widths.length === 0 ? 0 : Math.max(...widths),
+    widthVariance: variance(widths),
+  };
 }
 
 function getDarkeningPolarity(
@@ -739,12 +789,13 @@ function extractNarrowCore(input: {
   };
 }
 
-function estimateSkeletonBranchCount(pixels: { x: number; y: number }[], frameWidth: number) {
+function estimateSkeletonTopology(pixels: { x: number; y: number }[], frameWidth: number) {
   if (pixels.length === 0) {
-    return 0;
+    return { branchCount: 0, endpointCount: 0 };
   }
   const pixelSet = createPixelSet(pixels, frameWidth);
   let branches = 0;
+  let endpoints = 0;
   for (const pixel of pixels) {
     let neighbors = 0;
     for (let dy = -1; dy <= 1; dy += 1) {
@@ -759,9 +810,11 @@ function estimateSkeletonBranchCount(pixels: { x: number; y: number }[], frameWi
     }
     if (neighbors >= 4) {
       branches += 1;
+    } else if (neighbors === 1) {
+      endpoints += 1;
     }
   }
-  return branches;
+  return { branchCount: branches, endpointCount: endpoints };
 }
 
 function classifyComponent(input: {
@@ -770,9 +823,11 @@ function classifyComponent(input: {
   minorAxisLength: number;
   elongation: number;
   averageWidth: number;
+  maxWidth: number;
   widthVariance: number;
   edgeSharpness: number;
   edgeDensity: number;
+  maxGradient: number;
   localContrast: number;
   gradientMagnitude: number;
   solidity: number;
@@ -782,18 +837,23 @@ function classifyComponent(input: {
   darkeningPolarity: number;
   skeletonLength: number;
   skeletonBranchCount: number;
+  skeletonEndpointCount: number;
   boardOverlapRatio: number;
   bboxAreaRatio: number;
 }) {
-  const elongationScore = clamp01((input.elongation - 2.2) / 2.4);
+  const elongationScore = clamp01(
+    (input.elongation - cameraShadowDetectionThresholds.elongationReject) / 2.4,
+  );
   const highElongationBonus = clamp01((input.elongation - 4) / 2);
   const coreLengthScore = clamp01((input.skeletonLength - 10) / 28);
   const widthScore = clamp01(1 - (input.averageWidth - 2.5) / 8);
   const widthVarianceScore = clamp01(1 - input.widthVariance / 8);
   const sharpnessScore = clamp01(input.edgeSharpness / 90);
+  const maxGradientScore = clamp01(input.maxGradient / 130);
   const contrastScore = clamp01(input.localContrast / 120);
   const overlapScore = clamp01(input.boardOverlapRatio);
   const branchPenalty = clamp01(input.skeletonBranchCount / 8);
+  const endpointScore = input.skeletonEndpointCount === 2 ? 0.08 : -0.04;
   const dartLikelihood = clamp01(
     elongationScore * 0.24 +
       highElongationBonus * 0.1 +
@@ -801,13 +861,18 @@ function classifyComponent(input: {
       widthScore * 0.12 +
       widthVarianceScore * 0.08 +
       sharpnessScore * 0.1 +
+      maxGradientScore * 0.06 +
       contrastScore * 0.08 +
       overlapScore * 0.06 -
-      branchPenalty * 0.12,
+      branchPenalty * 0.12 +
+      endpointScore,
   );
 
-  const lowElongationShadow = clamp01((2.2 - input.elongation) / 1.2);
+  const lowElongationShadow = clamp01(
+    (cameraShadowDetectionThresholds.elongationReject - input.elongation) / 1.2,
+  );
   const broadScore = clamp01((input.averageWidth - 5.8) / 8);
+  const maxBroadScore = clamp01((input.maxWidth - 8) / 10);
   const blurScore = clamp01(input.boundaryBlur);
   const solidBlobScore = clamp01((input.solidity - 0.52) / 0.35);
   const compactScore = clamp01((input.compactness - 0.18) / 0.4);
@@ -817,6 +882,7 @@ function classifyComponent(input: {
   const shadowLikelihood = clamp01(
     lowElongationShadow * 0.24 +
       broadScore * 0.16 +
+      maxBroadScore * 0.1 +
       blurScore * 0.12 +
       solidBlobScore * 0.14 +
       compactScore * 0.08 +
@@ -829,9 +895,20 @@ function classifyComponent(input: {
   );
 
   let rejectionReason: string | null = null;
-  if (input.elongation < 2.2 && coreLengthScore < 0.25) {
+  if (
+    input.elongation < cameraShadowDetectionThresholds.elongationReject &&
+    coreLengthScore < 0.25
+  ) {
     rejectionReason = 'LOW_ELONGATION_SHADOW';
-  } else if (shadowLikelihood >= 0.62 && dartLikelihood < 0.5) {
+  } else if (
+    input.elongation < cameraShadowDetectionThresholds.elongationLowConfidence &&
+    dartLikelihood < cameraShadowDetectionThresholds.dartLikelihoodMinimum
+  ) {
+    rejectionReason = 'LOW_ELONGATION_LOW_CONFIDENCE';
+  } else if (
+    shadowLikelihood >= cameraShadowDetectionThresholds.shadowLikelihoodMaximum &&
+    dartLikelihood < cameraShadowDetectionThresholds.strongDartLikelihood
+  ) {
     rejectionReason = 'SHADOW_LIKELY';
   } else if (input.averageWidth > 12 && coreLengthScore < 0.35) {
     rejectionReason = 'BROAD_BLURRED_COMPONENT';
@@ -882,7 +959,17 @@ function createTipCandidates(
 
   return endpoints
     .map((endpoint, index): TipCandidateFeature => {
-      const boardScore = scorePointWithCalibration(endpoint, input.calibration, dimensions);
+      const initialBoardScore = scorePointWithCalibration(endpoint, input.calibration, dimensions);
+      const sourceRefinement = refineTipForSourceFrame(
+        input,
+        component,
+        endpoint,
+        initialBoardScore,
+      );
+      const finalEndpoint = sourceRefinement
+        ? { x: sourceRefinement.refinedX, y: sourceRefinement.refinedY }
+        : endpoint;
+      const boardScore = scorePointWithCalibration(finalEndpoint, input.calibration, dimensions);
       const otherScore = scorePointWithCalibration(
         otherEndpoints[index],
         input.calibration,
@@ -915,8 +1002,8 @@ function createTipCandidates(
         radialTipBonus +
         boundaryBonus;
       return {
-        x: endpoint.x,
-        y: endpoint.y,
+        x: finalEndpoint.x,
+        y: finalEndpoint.y,
         score,
         reason: [
           `axis-end-${index + 1}`,
@@ -926,12 +1013,72 @@ function createTipCandidates(
           `dart ${component.dartLikelihood.toFixed(2)}`,
           `shadow ${component.shadowLikelihood.toFixed(2)}`,
           component.narrowCore.axis ? 'narrow core axis' : 'component axis',
+          sourceRefinement ? 'source 640 roi' : 'analysis frame',
         ].join(' / '),
         component,
         boardScore,
+        sourceRefinement,
+        tipEvaluation:
+          sourceRefinement?.evaluation ??
+          createTipEvaluation({
+            point: endpoint,
+            score,
+            boardScore,
+            edgeSharpness: component.edgeSharpness,
+            reason: 'analysis-resolution-tip',
+          }),
       };
     })
     .filter((tip) => tip.score > 0.12 && tip.boardScore.boardRadius <= 1.08);
+}
+
+function refineTipForSourceFrame(
+  input: BasicImageDifferenceInput,
+  component: DartComponentFeature,
+  endpoint: { x: number; y: number },
+  boardScore: ReturnType<typeof scorePointWithCalibration>,
+) {
+  if (!input.sourceBaselineFrame || !input.sourceThrownFrame) {
+    return null;
+  }
+  if (
+    input.sourceBaselineFrame.width <= input.thrownFrame.width ||
+    input.sourceThrownFrame.width <= input.thrownFrame.width
+  ) {
+    return null;
+  }
+  return refineTipAtSourceResolution({
+    baselineFrame: input.sourceBaselineFrame,
+    thrownFrame: input.sourceThrownFrame,
+    lowResolutionTip: endpoint,
+    componentCentroid: component.centroid,
+    componentBoundingBox: component.narrowCore.boundingBox ?? component.boundingBox,
+    threshold: input.threshold,
+    boardRadius: boardScore.boardRadius,
+    withinDoubleOuter: boardScore.withinDoubleOuter,
+    shadowDirectionDeg: input.shadowDirectionDeg,
+  });
+}
+
+function createTipEvaluation(input: {
+  point: { x: number; y: number };
+  score: number;
+  boardScore: ReturnType<typeof scorePointWithCalibration>;
+  edgeSharpness: number;
+  reason: string;
+}): TipEvaluation {
+  return {
+    x: input.point.x,
+    y: input.point.y,
+    score: input.score,
+    insideBoard: input.boardScore.boardRadius <= 1.08,
+    insideDoubleOuter: input.boardScore.withinDoubleOuter,
+    edgeSharpness: input.edgeSharpness,
+    directionScore: 0,
+    stabilityScore: clamp01(input.score),
+    shadowDirectionPenalty: 0,
+    reason: input.reason,
+  };
 }
 
 function rankTipCandidates(tips: TipCandidateFeature[]) {
@@ -960,25 +1107,33 @@ function isDartCandidateComponent(component: DartComponentFeature) {
     component.edgeSharpness >= 28 &&
     component.shadowLikelihood < 0.5;
   if (
-    component.averageWidth >= 7 &&
-    component.shadowLikelihood >= 0.55 &&
+    component.averageWidth >= cameraShadowDetectionThresholds.broadShadowWidth &&
+    component.shadowLikelihood >= cameraShadowDetectionThresholds.shadowLikelihoodMaximum &&
     component.dartLikelihood < 0.18 &&
-    component.edgeSharpness < 42
+    component.edgeSharpness < cameraShadowDetectionThresholds.lowEdgeSharpness
   ) {
     return false;
   }
   if (component.rejectionReason && !hasUsableCore && !hasBrightCore && !isSharpNarrowFragment) {
     return false;
   }
-  if (component.shadowLikelihood >= 0.66 && component.dartLikelihood < 0.58) {
-    return false;
-  }
-  if (component.elongation < 2.2 && !hasUsableCore && !hasBrightCore && !isSharpNarrowFragment) {
+  if (
+    component.shadowLikelihood >= cameraShadowDetectionThresholds.shadowLikelihoodMaximum &&
+    component.dartLikelihood < cameraShadowDetectionThresholds.strongDartLikelihood
+  ) {
     return false;
   }
   if (
-    component.elongation < 3 &&
-    component.dartLikelihood < 0.24 &&
+    component.elongation < cameraShadowDetectionThresholds.elongationReject &&
+    !hasUsableCore &&
+    !hasBrightCore &&
+    !isSharpNarrowFragment
+  ) {
+    return false;
+  }
+  if (
+    component.elongation < cameraShadowDetectionThresholds.elongationLowConfidence &&
+    component.dartLikelihood < cameraShadowDetectionThresholds.dartLikelihoodMinimum &&
     !hasUsableCore &&
     !hasBrightCore &&
     !isSharpNarrowFragment
@@ -987,7 +1142,10 @@ function isDartCandidateComponent(component: DartComponentFeature) {
   }
   return (
     component.boardOverlapRatio >= 0.35 &&
-    (component.dartLikelihood >= 0.24 || hasUsableCore || hasBrightCore || isSharpNarrowFragment)
+    (component.dartLikelihood >= cameraShadowDetectionThresholds.dartLikelihoodMinimum ||
+      hasUsableCore ||
+      hasBrightCore ||
+      isSharpNarrowFragment)
   );
 }
 
@@ -1001,8 +1159,9 @@ function suppressNearbyTips(tips: TipCandidateFeature[]) {
         tip.boardScore.segmentNumber === selectedTip.boardScore.segmentNumber &&
         tip.boardScore.multiplier === selectedTip.boardScore.multiplier;
       return (
-        normalizedDistance < 0.045 ||
-        (sameComponent && normalizedDistance < 0.12) ||
+        normalizedDistance < cameraShadowDetectionThresholds.nearCandidateDistance ||
+        (sameComponent &&
+          normalizedDistance < cameraShadowDetectionThresholds.sameComponentDistance) ||
         sameScoringCell
       );
     });
@@ -1143,6 +1302,14 @@ function createCandidateFromTip(input: {
             : 'opposite axis endpoint',
       },
     ],
+    tipEvaluationDiagnostics: [input.tip.tipEvaluation],
+    highResolutionRoi: input.tip.sourceRefinement
+      ? {
+          ...input.tip.sourceRefinement.roi,
+          sourceWidth: input.tip.sourceRefinement.sourceWidth,
+          sourceHeight: input.tip.sourceRefinement.sourceHeight,
+        }
+      : undefined,
     scoreDiagnostics,
     componentDiagnostics: {
       area: input.tip.component.area,
@@ -1158,11 +1325,15 @@ function createCandidateFromTip(input: {
       persistenceCount: input.tip.component.persistenceCount,
       boardOverlapRatio: input.tip.component.boardOverlapRatio,
       averageWidth: input.tip.component.averageWidth,
+      maxWidth: input.tip.component.maxWidth,
       widthVariance: input.tip.component.widthVariance,
       edgeSharpness: input.tip.component.edgeSharpness,
       edgeDensity: input.tip.component.edgeDensity,
+      averageGradient: input.tip.component.gradientMagnitude,
+      maxGradient: input.tip.component.maxGradient,
       localContrast: input.tip.component.localContrast,
       gradientMagnitude: input.tip.component.gradientMagnitude,
+      brightnessVariance: input.tip.component.interiorBrightnessVariance,
       solidity: input.tip.component.solidity,
       compactness: input.tip.component.compactness,
       interiorBrightnessVariance: input.tip.component.interiorBrightnessVariance,
@@ -1170,6 +1341,7 @@ function createCandidateFromTip(input: {
       darkeningPolarity: input.tip.component.darkeningPolarity,
       skeletonLength: input.tip.component.skeletonLength,
       skeletonBranchCount: input.tip.component.skeletonBranchCount,
+      skeletonEndpointCount: input.tip.component.skeletonEndpointCount,
       dartLikelihood: input.tip.component.dartLikelihood,
       shadowLikelihood: input.tip.component.shadowLikelihood,
       rejectionReason: input.tip.component.rejectionReason,
@@ -1219,7 +1391,9 @@ function dedupeCandidates(candidates: DetectionCandidate[]) {
       );
       const sameScore =
         candidate.segment === existing.segment && candidate.multiplier === existing.multiplier;
-      return normalizedDistance < 0.045 || sameScore;
+      return (
+        normalizedDistance < cameraShadowDetectionThresholds.nearCandidateDistance || sameScore
+      );
     });
     if (duplicate) {
       return false;
