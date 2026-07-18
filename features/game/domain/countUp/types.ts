@@ -35,6 +35,7 @@ export type CountUpGameState = {
   status: string;
   bullRule: BullRule;
   playerName: string;
+  startedAt: string | null;
   currentRoundNo: number;
   currentTurnId: string | null;
   currentTurnScore: number;

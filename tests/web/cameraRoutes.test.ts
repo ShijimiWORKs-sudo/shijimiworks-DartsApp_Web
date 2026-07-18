@@ -9,13 +9,18 @@ function readRepoFile(relativePath: string) {
   return fs.readFileSync(path.join(root, relativePath), 'utf8');
 }
 
-test('camera routes expose intro, capture, review, accepted, LAN host, and Camera Node screens', () => {
+test('camera routes expose intro, capture, review, accepted, LAN host, Camera Node, and local camera screens', () => {
   assert.match(readRepoFile('app/camera/index.tsx'), /カメラ撮影テスト/);
+  assert.match(readRepoFile('app/camera/home.tsx'), /カメラPC単体モード/);
   assert.match(readRepoFile('app/camera/capture.tsx'), /CameraView/);
   assert.match(readRepoFile('app/camera/review.tsx'), /撮影結果/);
   assert.match(readRepoFile('app/camera/accepted.tsx'), /撮影完了/);
   assert.match(readRepoFile('app/camera/lan.tsx'), /LAN Camera 接続/);
   assert.match(readRepoFile('app/camera/node.tsx'), /Camera Node/);
+  assert.match(readRepoFile('app/camera/local-game/index.tsx'), /このPCでゲーム/);
+  assert.match(readRepoFile('app/camera/local-count-up/settings.tsx'), /カメラCOUNT-UP設定/);
+  assert.match(readRepoFile('app/camera/calibration.tsx'), /Camera Calibration/);
+  assert.match(readRepoFile('app/camera/awards/index.tsx'), /Award確認/);
 });
 
 test('camera capture screen uses CameraView and useCameraPermissions through session hook', () => {
@@ -27,6 +32,25 @@ test('camera capture screen uses CameraView and useCameraPermissions through ses
   assert.match(sessionHook, /CameraView\.isAvailableAsync/);
   assert.match(sessionHook, /onCameraReady|markCameraReady/);
   assert.match(sessionHook, /setIsReady\(false\)/);
+});
+
+test('web camera preview uses one MediaStream for preview and analysis', () => {
+  const preview = readRepoFile('components/camera/CameraPreviewSurface.tsx');
+  const sessionHook = readRepoFile('features/camera/ui/useCameraSession.ts');
+  const play = readRepoFile('app/camera/local-count-up/[gameId]/index.tsx');
+  const webStream = readRepoFile('features/camera/ui/WebCameraStream.ts');
+
+  assert.match(webStream, /\{ width: 1920, height: 1080 \}/);
+  assert.match(webStream, /\{ width: 1280, height: 720 \}/);
+  assert.match(webStream, /\{ width: 640, height: 480 \}/);
+  assert.match(webStream, /frameRate: \{ ideal: 30, max: 30 \}/);
+  assert.match(webStream, /webCameraResolutionFallbacks/);
+  assert.match(sessionHook, /openPreferredWebCameraStream\(\{ facing \}\)/);
+  assert.match(preview, /Platform\.OS === 'web'/);
+  assert.match(preview, /<WebCameraPreview cameraSession=\{cameraSession\} \/>/);
+  assert.match(preview, /video\.srcObject = webStream/);
+  assert.match(preview, /recordWebVideoMetrics/);
+  assert.match(play, /cameraSession\.getWebVideoElement/);
 });
 
 test('camera foundation does not persist images to sqlite or call recognition libraries', () => {

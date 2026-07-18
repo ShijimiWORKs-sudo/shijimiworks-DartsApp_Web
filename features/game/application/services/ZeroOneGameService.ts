@@ -203,7 +203,7 @@ export class ZeroOneGameService implements ZeroOneGameServicePort {
     const row = await this.db.getFirstAsync<GameRow>(
       `SELECT
          g.id, g.status, g.bull_rule, g.out_rule, g.zero_one_start_score,
-         g.current_round_no, g.current_turn_sequence_no, gp.display_name_snapshot,
+         g.current_round_no, g.current_turn_sequence_no, g.started_at, gp.display_name_snapshot,
          gp.current_remaining_score
        FROM game_sessions g
        JOIN game_players gp ON gp.game_id = g.id
@@ -237,6 +237,7 @@ export class ZeroOneGameService implements ZeroOneGameServicePort {
       outRule: row.out_rule,
       startScore: validateZeroOneStartScore(row.zero_one_start_score),
       playerName: row.display_name_snapshot,
+      startedAt: row.started_at,
       currentRoundNo: row.current_round_no,
       currentTurnId: currentTurn?.id ?? null,
       currentTurnScore: currentTurn?.status === 'in_progress' ? currentTurn.rawScore : 0,
@@ -475,6 +476,7 @@ type GameRow = {
   zero_one_start_score: number;
   current_round_no: number;
   current_turn_sequence_no: number;
+  started_at: string | null;
   display_name_snapshot: string;
   current_remaining_score: number | null;
 };

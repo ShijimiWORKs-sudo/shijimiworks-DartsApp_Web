@@ -13,6 +13,7 @@ export type LanCameraSegment =
   1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20 | 25;
 export type LanCameraMultiplier = 0 | 1 | 2 | 3;
 export type LanCameraCandidateSource = 'camera_node';
+export type LanCameraGameSetupMode = 'count_up' | 'zero_one' | 'cricket' | 'match';
 export type LanCameraRejectionReason =
   | 'INVALID_JSON'
   | 'INVALID_MESSAGE'
@@ -107,6 +108,101 @@ export type TestDetectionCandidate = LanCameraBaseMessage & {
 
 export type DetectionCandidate = Omit<TestDetectionCandidate, 'type'> & {
   type: 'detection_candidate';
+  baselineFrameId?: string;
+  changedPixelRatio?: number;
+  boundingBox?: { x: number; y: number; width: number; height: number } | null;
+  componentBoundingBox?: { x: number; y: number; width: number; height: number } | null;
+  fittedAxis?: {
+    start: { x: number; y: number };
+    end: { x: number; y: number };
+  } | null;
+  tipCandidates?: {
+    x: number;
+    y: number;
+    score: number;
+    reason: string;
+  }[];
+  tipEvaluationDiagnostics?: {
+    x: number;
+    y: number;
+    score: number;
+    insideBoard: boolean;
+    insideDoubleOuter: boolean;
+    edgeSharpness: number;
+    directionScore: number;
+    stabilityScore: number;
+    shadowDirectionPenalty: number;
+    reason: string;
+  }[];
+  highResolutionRoi?: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    sourceWidth: number;
+    sourceHeight: number;
+  };
+  narrowCoreBoundingBox?: { x: number; y: number; width: number; height: number } | null;
+  rejectedShadowComponents?: {
+    boundingBox: { x: number; y: number; width: number; height: number };
+    shadowLikelihood: number;
+    rejectionReason: string;
+  }[];
+  scoreDiagnostics?: {
+    normalizedX: number;
+    normalizedY: number;
+    boardRadius: number;
+    boardAngleDeg: number;
+    segmentIndex: number | null;
+    segmentNumber: number | null;
+    area: string;
+    multiplier: number;
+    score: number;
+    withinDoubleOuter: boolean;
+    calibrationProfileId?: string;
+    rotationDeg?: number;
+    distanceToSegmentBoundaryDeg?: number | null;
+  };
+  componentDiagnostics?: {
+    area: number;
+    width: number;
+    height: number;
+    aspectRatio: number;
+    majorAxisLength: number;
+    minorAxisLength: number;
+    elongation: number;
+    centroid: { x: number; y: number };
+    maxDelta: number;
+    averageDelta: number;
+    persistenceCount: number;
+    boardOverlapRatio: number;
+    averageWidth: number;
+    maxWidth?: number;
+    widthVariance: number;
+    edgeSharpness: number;
+    edgeDensity: number;
+    averageGradient?: number;
+    maxGradient?: number;
+    localContrast: number;
+    gradientMagnitude: number;
+    brightnessVariance?: number;
+    solidity: number;
+    compactness: number;
+    interiorBrightnessVariance: number;
+    boundaryBlur: number;
+    darkeningPolarity: number;
+    skeletonLength: number;
+    skeletonBranchCount: number;
+    skeletonEndpointCount?: number;
+    dartLikelihood: number;
+    shadowLikelihood: number;
+    rejectionReason: string | null;
+    tipSelectionReason: string;
+  };
+  reason?: string;
+  alternateCandidateIds?: string[];
+  calibrationProfileId?: string;
+  algorithmVersion?: string;
 };
 
 export type DetectionAccepted = LanCameraBaseMessage & {
@@ -128,6 +224,49 @@ export type ErrorMessage = LanCameraBaseMessage & {
   message: string;
 };
 
+export type GameSetupRequest = LanCameraBaseMessage & {
+  type: 'game_setup_request';
+  cameraNodeId: string;
+  requestId: string;
+  mode: LanCameraGameSetupMode;
+  settings: Record<string, unknown>;
+};
+
+export type GameSetupAccepted = LanCameraBaseMessage & {
+  type: 'game_setup_accepted';
+  requestId: string;
+  acceptedAt: string;
+};
+
+export type GameSetupRejected = LanCameraBaseMessage & {
+  type: 'game_setup_rejected';
+  requestId: string;
+  reason: string;
+};
+
+export type GameStarted = LanCameraBaseMessage & {
+  type: 'game_started';
+  requestId: string;
+  gameId: string;
+  mode: LanCameraGameSetupMode;
+  authority: 'game_pc';
+};
+
+export type GameStateSnapshot = LanCameraBaseMessage & {
+  type: 'game_state_snapshot';
+  gameId: string;
+  mode: LanCameraGameSetupMode;
+  status: string;
+  payload: Record<string, unknown>;
+};
+
+export type GameEnded = LanCameraBaseMessage & {
+  type: 'game_ended';
+  gameId: string;
+  mode: LanCameraGameSetupMode;
+  reason: string;
+};
+
 export type LanCameraMessage =
   | PairRequest
   | PairAccepted
@@ -142,7 +281,13 @@ export type LanCameraMessage =
   | DetectionCandidate
   | DetectionAccepted
   | DetectionRejected
-  | ErrorMessage;
+  | ErrorMessage
+  | GameSetupRequest
+  | GameSetupAccepted
+  | GameSetupRejected
+  | GameStarted
+  | GameStateSnapshot
+  | GameEnded;
 
 export type LanCameraCandidateLogEntry = {
   candidate: TestDetectionCandidate | DetectionCandidate;

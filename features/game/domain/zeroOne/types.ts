@@ -94,6 +94,7 @@ export type ZeroOneGameState = {
   gameId: string;
   status: GameStatus;
   playerName: string;
+  startedAt: string | null;
   bullRule: BullRule;
   outRule: ZeroOneOutRule;
   startScore: ZeroOneStartScore;
