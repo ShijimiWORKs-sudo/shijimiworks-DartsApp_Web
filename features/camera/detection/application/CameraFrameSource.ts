@@ -16,6 +16,7 @@ export type CameraAnalysisFrame = {
   uriPrefixKind?: string;
   base64Kind?: string;
   decodeStatus?: 'success';
+  sourceFrame?: CameraAnalysisFrame;
 };
 
 export type CameraFrameSource = {

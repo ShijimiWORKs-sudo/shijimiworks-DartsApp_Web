@@ -58,20 +58,59 @@ export async function decodeImageToGrayscaleFrame(input: {
 
   const image = await loadImage(input.source, input.timeoutMs ?? 5000);
   const maxSize = input.maxSize ?? 96;
-  const scale = Math.min(1, maxSize / Math.max(image.width, image.height));
-  const width = Math.max(1, Math.round(image.width * scale));
-  const height = Math.max(1, Math.round(image.height * scale));
+  const sourceMaxSize = Math.max(maxSize, 640);
+  const sourceScale = Math.min(1, sourceMaxSize / Math.max(image.width, image.height));
+  const sourceWidth = Math.max(1, Math.round(image.width * sourceScale));
+  const sourceHeight = Math.max(1, Math.round(image.height * sourceScale));
+  const sourceFrame = drawImageToFrame({
+    image,
+    width: sourceWidth,
+    height: sourceHeight,
+    input,
+  });
+  const scale = Math.min(1, maxSize / Math.max(sourceFrame.width, sourceFrame.height));
+  const width = Math.max(1, Math.round(sourceFrame.width * scale));
+  const height = Math.max(1, Math.round(sourceFrame.height * scale));
+  const analysisFrame =
+    width === sourceFrame.width && height === sourceFrame.height
+      ? sourceFrame
+      : resizeFramePixels(sourceFrame, width, height);
+
+  return {
+    ...analysisFrame,
+    sourceFrame:
+      analysisFrame.width === sourceFrame.width && analysisFrame.height === sourceFrame.height
+        ? undefined
+        : sourceFrame,
+  };
+}
+
+function drawImageToFrame(input: {
+  image: HTMLImageElement;
+  width: number;
+  height: number;
+  input: {
+    frameId: string;
+    capturedAt: string;
+    sourceKind?: string;
+    mimeType?: string;
+    capturedWidth?: number;
+    capturedHeight?: number;
+    uriPrefixKind?: string;
+    base64Kind?: string;
+  };
+}): CameraAnalysisFrame {
   const canvas = document.createElement('canvas');
-  canvas.width = width;
-  canvas.height = height;
+  canvas.width = input.width;
+  canvas.height = input.height;
   const context = canvas.getContext('2d', { willReadFrequently: true });
   if (!context) {
     throw new Error('WEB_CANVAS_CONTEXT_UNAVAILABLE');
   }
 
-  context.drawImage(image, 0, 0, width, height);
-  const data = context.getImageData(0, 0, width, height).data;
-  const grayPixels = new Uint8Array(width * height);
+  context.drawImage(input.image, 0, 0, input.width, input.height);
+  const data = context.getImageData(0, 0, input.width, input.height).data;
+  const grayPixels = new Uint8Array(input.width * input.height);
   for (let index = 0; index < grayPixels.length; index += 1) {
     const offset = index * 4;
     grayPixels[index] = Math.round(
@@ -80,20 +119,45 @@ export async function decodeImageToGrayscaleFrame(input: {
   }
 
   return {
-    frameId: input.frameId,
+    frameId: input.input.frameId,
+    width: input.width,
+    height: input.height,
+    grayPixels,
+    capturedAt: input.input.capturedAt,
+    sourceKind: input.input.sourceKind,
+    mimeType: input.input.mimeType,
+    capturedWidth: input.input.capturedWidth ?? input.image.width,
+    capturedHeight: input.input.capturedHeight ?? input.image.height,
+    analysisWidth: input.width,
+    analysisHeight: input.height,
+    uriPrefixKind: input.input.uriPrefixKind,
+    base64Kind: input.input.base64Kind,
+    decodeStatus: 'success',
+  };
+}
+
+function resizeFramePixels(
+  sourceFrame: CameraAnalysisFrame,
+  width: number,
+  height: number,
+): CameraAnalysisFrame {
+  const grayPixels = new Uint8Array(width * height);
+  const scaleX = sourceFrame.width / width;
+  const scaleY = sourceFrame.height / height;
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const sourceX = Math.min(sourceFrame.width - 1, Math.floor(x * scaleX));
+      const sourceY = Math.min(sourceFrame.height - 1, Math.floor(y * scaleY));
+      grayPixels[y * width + x] = sourceFrame.grayPixels[sourceY * sourceFrame.width + sourceX];
+    }
+  }
+  return {
+    ...sourceFrame,
     width,
     height,
     grayPixels,
-    capturedAt: input.capturedAt,
-    sourceKind: input.sourceKind,
-    mimeType: input.mimeType,
-    capturedWidth: input.capturedWidth ?? image.width,
-    capturedHeight: input.capturedHeight ?? image.height,
     analysisWidth: width,
     analysisHeight: height,
-    uriPrefixKind: input.uriPrefixKind,
-    base64Kind: input.base64Kind,
-    decodeStatus: 'success',
   };
 }
 

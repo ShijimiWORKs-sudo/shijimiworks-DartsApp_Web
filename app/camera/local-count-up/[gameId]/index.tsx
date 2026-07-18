@@ -22,6 +22,7 @@ import { AwardRegistry } from '../../../../features/awards/application/AwardRegi
 import type { AwardEvent } from '../../../../features/awards/domain/types';
 import { useBoardCalibrationEditor } from '../../../../features/camera/calibration/ui/useBoardCalibrationEditor';
 import { analyzeImageDifference } from '../../../../features/camera/detection/application/BasicImageDifferenceScoring';
+import { CameraDetectionTestRecorder } from '../../../../features/camera/detection/application/CameraDetectionTestRecorder';
 import { CameraLocalCountUpAdapter } from '../../../../features/camera/detection/application/CameraLocalCountUpAdapter';
 import {
   analyzePersistentBoardDifference,
@@ -37,7 +38,13 @@ import {
   type DetectionState,
   type MotionAnalysis,
 } from '../../../../features/camera/detection/application/CameraFrameSource';
-import { WebCameraFrameSource } from '../../../../features/camera/detection/infrastructure/WebCameraFrameSource';
+import {
+  analyzeLightingQuality,
+  serializeLightingReport,
+  type LightingQualityReport,
+} from '../../../../features/camera/detection/application/LightingQualityAnalyzer';
+import { ShadowProfileService } from '../../../../features/camera/detection/application/ShadowProfileService';
+import { DirectCanvasCameraFrameSource } from '../../../../features/camera/detection/infrastructure/DirectCanvasCameraFrameSource';
 import { useCameraSession } from '../../../../features/camera/ui/useCameraSession';
 import {
   clearCountUpRedoSession,
@@ -97,7 +104,11 @@ export default function CameraLocalCountUpPlayScreen() {
   const [persistentChangeSeen, setPersistentChangeSeen] = useState(false);
   const [baselineNoise, setBaselineNoise] = useState<BaselineNoiseProfile | null>(null);
   const [lastTransitionReason, setLastTransitionReason] = useState('initializing');
+  const [lightingReport, setLightingReport] = useState<LightingQualityReport | null>(null);
+  const [lightingMessage, setLightingMessage] = useState('未測定');
+  const [testRecordJson, setTestRecordJson] = useState('');
   const baselineFrameRef = useRef<CameraAnalysisFrame | null>(null);
+  const sourceBaselineFrameRef = useRef<CameraAnalysisFrame | null>(null);
   const baselineMonitorFrameRef = useRef<CameraAnalysisFrame | null>(null);
   const previousFrameRef = useRef<CameraAnalysisFrame | null>(null);
   const lastStableFrameRef = useRef<CameraAnalysisFrame | null>(null);
@@ -115,12 +126,16 @@ export default function CameraLocalCountUpPlayScreen() {
   const baselineRetryCountRef = useRef(0);
   const baselineRetryBlockedUntilRef = useRef(0);
   const capturePictureRef = useRef(cameraSession.capturePicture);
-  const frameSourceRef = useRef<WebCameraFrameSource | null>(null);
+  const frameSourceRef = useRef<CameraFrameSource | null>(null);
+  const shadowProfileRef = useRef(new ShadowProfileService());
+  const testRecorderRef = useRef(new CameraDetectionTestRecorder());
 
   capturePictureRef.current = cameraSession.capturePicture;
   if (!frameSourceRef.current) {
-    frameSourceRef.current = new WebCameraFrameSource({
-      captureImage: () => capturePictureRef.current(cameraRef.current),
+    frameSourceRef.current = new DirectCanvasCameraFrameSource({
+      getVideoElement: () =>
+        typeof document === 'undefined' ? null : document.querySelector('video'),
+      fallbackCaptureImage: () => capturePictureRef.current(cameraRef.current),
     });
   }
 
@@ -194,6 +209,7 @@ export default function CameraLocalCountUpPlayScreen() {
   const clearBaseline = useCallback(
     (message: string) => {
       baselineFrameRef.current = null;
+      sourceBaselineFrameRef.current = null;
       baselineMonitorFrameRef.current = null;
       previousFrameRef.current = null;
       lastStableFrameRef.current = null;
@@ -282,6 +298,7 @@ export default function CameraLocalCountUpPlayScreen() {
       if (options?.manual) {
         stopMonitorLoop();
         baselineFrameRef.current = null;
+        sourceBaselineFrameRef.current = null;
         baselineMonitorFrameRef.current = null;
         previousFrameRef.current = null;
         lastStableFrameRef.current = null;
@@ -353,6 +370,7 @@ export default function CameraLocalCountUpPlayScreen() {
           return;
         }
         baselineFrameRef.current = baselineFrame;
+        sourceBaselineFrameRef.current = baselineFrame.sourceFrame ?? baselineFrame;
         baselineNoiseRef.current = noiseProfile;
         pendingThrownFrameRef.current = null;
         resetThrowDetectionRefs(baselineFrame);
@@ -479,7 +497,14 @@ export default function CameraLocalCountUpPlayScreen() {
           throwIndex,
           baselineFrame: toGrayscaleFrame(baselineFrameRef.current),
           thrownFrame: toGrayscaleFrame(thrownFrame),
+          sourceBaselineFrame: sourceBaselineFrameRef.current
+            ? toGrayscaleFrame(sourceBaselineFrameRef.current)
+            : undefined,
+          sourceThrownFrame: thrownFrame.sourceFrame
+            ? toGrayscaleFrame(thrownFrame.sourceFrame)
+            : toGrayscaleFrame(thrownFrame),
           calibration: calibrationEditor.profile,
+          shadowDirectionDeg: shadowProfileRef.current.getProfile().directionDeg,
           now: new Date(),
         });
         setLastProcessingMs(result.processingMs);
@@ -832,9 +857,46 @@ export default function CameraLocalCountUpPlayScreen() {
           candidate: selected.candidate,
           source,
         });
+        const detectionCandidate = asDetectionCandidate(selected.candidate);
+        if (source === 'camera_corrected') {
+          shadowProfileRef.current.addCorrectionSample({
+            detected: {
+              x: selected.candidate.normalizedX,
+              y: selected.candidate.normalizedY,
+            },
+            corrected: {
+              x: selected.candidate.normalizedX,
+              y: selected.candidate.normalizedY,
+            },
+            componentWidthPx: detectionCandidate?.componentDiagnostics?.averageWidth,
+            capturedAt: new Date().toISOString(),
+          });
+        }
+        testRecorderRef.current.addRecord({
+          sessionId: game.gameId,
+          throwIndex: activeDarts.length + 1,
+          candidate: detectionCandidate,
+          actual: {
+            segment: selected.candidate.segment,
+            multiplier: selected.candidate.multiplier,
+            label: formatCandidateLabel(selected.candidate.segment, selected.candidate.multiplier),
+          },
+          lighting: lightingReport
+            ? {
+                quality: lightingReport.quality,
+                shadowRisk: lightingReport.shadowRisk,
+                horizontalDifference: lightingReport.horizontalDifference,
+                verticalDifference: lightingReport.verticalDifference,
+                glareRatio: lightingReport.glareRatio,
+              }
+            : undefined,
+        });
+        setTestRecordJson(testRecorderRef.current.toJson());
         clearRedoSession();
         if (pendingThrownFrameRef.current) {
           baselineFrameRef.current = pendingThrownFrameRef.current;
+          sourceBaselineFrameRef.current =
+            pendingThrownFrameRef.current.sourceFrame ?? pendingThrownFrameRef.current;
           setBaselineFrameId(pendingThrownFrameRef.current.frameId);
           resetThrowDetectionRefs(pendingThrownFrameRef.current);
           pendingThrownFrameRef.current = null;
@@ -848,11 +910,13 @@ export default function CameraLocalCountUpPlayScreen() {
       });
     },
     [
+      activeDarts.length,
       adapter,
       candidateOptions,
       clearRedoSession,
       game,
       inputDisabled,
+      lightingReport,
       resetThrowDetectionRefs,
       runAction,
       selectedCandidateIndex,
@@ -898,6 +962,32 @@ export default function CameraLocalCountUpPlayScreen() {
   }, [activeDarts, adapter, awardsEnabled, clearBaseline, clearRedoSession, game, runAction]);
 
   const currentAwardAsset = currentAward ? awardRegistry.get(currentAward.code) : null;
+
+  const runLightingDiagnostics = useCallback(async () => {
+    const frameSource = frameSourceRef.current;
+    if (!frameSource || !cameraReady) {
+      setLightingMessage('カメラ準備後に照明診断を実行してください。');
+      return;
+    }
+    setLightingMessage('照明診断中...');
+    try {
+      const frames: CameraAnalysisFrame[] = [];
+      for (let index = 0; index < 10; index += 1) {
+        frames.push(
+          await captureFrameWithTimeout(frameSource, {
+            maxSize: monitorFrameMaxSize,
+          }),
+        );
+        await sleep(500);
+      }
+      const report = analyzeLightingQuality(frames);
+      setLightingReport(report);
+      setLightingMessage(report.recommendation);
+    } catch (error) {
+      console.warn('Lighting diagnostics failed', error);
+      setLightingMessage('照明診断を完了できませんでした。少し待って再実行してください。');
+    }
+  }, [cameraReady]);
 
   return (
     <ScreenShell showNav={false}>
@@ -1079,6 +1169,70 @@ export default function CameraLocalCountUpPlayScreen() {
                 label="ダーツを抜きました／次ラウンド開始"
                 onPress={() => void captureBaseline({ manual: true })}
                 disabled={isBusy || !cameraReady}
+                variant="secondary"
+              />
+            </View>
+          </Card>
+
+          <Card>
+            <SectionTitle title="照明・影診断" tone="card" />
+            <View style={styles.statusGrid}>
+              <InfoRow label="lighting" value={lightingReport?.quality ?? '未測定'} />
+              <InfoRow
+                label="shadow risk"
+                value={lightingReport ? lightingReport.shadowRisk.toFixed(3) : '-'}
+              />
+              <InfoRow
+                label="左右差"
+                value={lightingReport ? lightingReport.horizontalDifference.toFixed(1) : '-'}
+              />
+              <InfoRow
+                label="上下差"
+                value={lightingReport ? lightingReport.verticalDifference.toFixed(1) : '-'}
+              />
+              <InfoRow
+                label="glare"
+                value={lightingReport ? `${(lightingReport.glareRatio * 100).toFixed(1)}%` : '-'}
+              />
+              <InfoRow
+                label="shadow profile"
+                value={`${shadowProfileRef.current.getLearningState()} / ${
+                  shadowProfileRef.current.getProfile().sampleCount
+                } samples`}
+              />
+            </View>
+            <Text style={styles.meta}>{lightingMessage}</Text>
+            {lightingReport ? (
+              <Text selectable style={styles.jsonText}>
+                {serializeLightingReport(lightingReport)}
+              </Text>
+            ) : null}
+            {testRecordJson ? (
+              <Text selectable style={styles.jsonText}>
+                {testRecordJson}
+              </Text>
+            ) : null}
+            <View style={styles.actionGrid}>
+              <AppButton
+                label="照明診断を5秒測定"
+                onPress={() => void runLightingDiagnostics()}
+                disabled={isBusy || !cameraReady}
+                variant="secondary"
+              />
+              <AppButton
+                label="影方向学習をリセット"
+                onPress={() => {
+                  shadowProfileRef.current.reset();
+                  setLightingMessage('影方向学習をリセットしました。');
+                }}
+                variant="secondary"
+              />
+              <AppButton
+                label="テスト記録JSONをクリア"
+                onPress={() => {
+                  testRecorderRef.current.clear();
+                  setTestRecordJson('');
+                }}
                 variant="secondary"
               />
             </View>
@@ -1450,6 +1604,23 @@ function formatDart(area: DartArea, segmentNumber: number | null) {
   }
 }
 
+function asDetectionCandidate(
+  candidate: CandidatePanelOption['candidate'],
+): import('../../../../features/camera/lan/domain/protocol').DetectionCandidate | null {
+  return candidate.type === 'detection_candidate' ? candidate : null;
+}
+
+function formatCandidateLabel(segment: number, multiplier: number) {
+  if (multiplier === 0) {
+    return 'MISS';
+  }
+  if (segment === 25) {
+    return multiplier === 2 ? 'IB' : 'OB';
+  }
+  const prefix = multiplier === 3 ? 'T' : multiplier === 2 ? 'D' : 'S';
+  return `${prefix}${segment}`;
+}
+
 const styles = StyleSheet.create({
   layout: {
     gap: 14,
@@ -1557,5 +1728,15 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '800',
     lineHeight: 20,
+  },
+  jsonText: {
+    marginTop: 8,
+    borderRadius: 8,
+    padding: 8,
+    backgroundColor: colors.surfaceMuted,
+    color: colors.textMuted,
+    fontSize: 11,
+    fontWeight: '700',
+    lineHeight: 16,
   },
 });

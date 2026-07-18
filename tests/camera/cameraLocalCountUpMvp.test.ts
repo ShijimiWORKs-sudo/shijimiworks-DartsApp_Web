@@ -85,7 +85,8 @@ test('camera COUNT-UP routes expose playable MVP controls without WebSocket depe
 test('camera COUNT-UP production route uses real frame source instead of replay fixtures', () => {
   const play = readRepoFile('app/camera/local-count-up/[gameId]/index.tsx');
 
-  assert.match(play, /WebCameraFrameSource/);
+  assert.match(play, /DirectCanvasCameraFrameSource/);
+  assert.match(play, /fallbackCaptureImage/);
   assert.match(play, /frameSource\.captureFrame\(options\)/);
   assert.match(play, /baselineFrameRef/);
   assert.match(play, /pendingThrownFrameRef/);
@@ -249,8 +250,12 @@ test('camera COUNT-UP monitor uses stable frame source and in-flight capture gua
   const play = readRepoFile('app/camera/local-count-up/[gameId]/index.tsx');
 
   assert.match(play, /capturePictureRef\.current = cameraSession\.capturePicture/);
-  assert.match(play, /frameSourceRef\.current = new WebCameraFrameSource/);
-  assert.match(play, /captureImage: \(\) => capturePictureRef\.current\(cameraRef\.current\)/);
+  assert.match(play, /frameSourceRef\.current = new DirectCanvasCameraFrameSource/);
+  assert.match(play, /document\.querySelector\('video'\)/);
+  assert.match(
+    play,
+    /fallbackCaptureImage: \(\) => capturePictureRef\.current\(cameraRef\.current\)/,
+  );
   assert.doesNotMatch(play, /new WebCameraFrameSource\(\{[\s\S]*\},\s*\[cameraSession\]/);
   assert.match(play, /if \(monitorInFlightRef\.current \|\| !canAutoMonitor\)/);
   assert.match(play, /finally \{\s*monitorInFlightRef\.current = false;/);

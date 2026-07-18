@@ -194,6 +194,8 @@ test('web image decode converts JPEG and PNG fixtures through canvas', async () 
     assert.equal(png.mimeType, 'image/png');
     assert.equal(png.width, 2);
     assert.equal(png.height, 1);
+    assert.equal(png.sourceFrame?.width, 4);
+    assert.equal(png.sourceFrame?.height, 2);
   } finally {
     restore();
   }
