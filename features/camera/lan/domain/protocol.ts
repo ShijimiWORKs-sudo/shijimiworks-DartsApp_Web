@@ -111,6 +111,47 @@ export type DetectionCandidate = Omit<TestDetectionCandidate, 'type'> & {
   baselineFrameId?: string;
   changedPixelRatio?: number;
   boundingBox?: { x: number; y: number; width: number; height: number } | null;
+  componentBoundingBox?: { x: number; y: number; width: number; height: number } | null;
+  fittedAxis?: {
+    start: { x: number; y: number };
+    end: { x: number; y: number };
+  } | null;
+  tipCandidates?: {
+    x: number;
+    y: number;
+    score: number;
+    reason: string;
+  }[];
+  scoreDiagnostics?: {
+    normalizedX: number;
+    normalizedY: number;
+    boardRadius: number;
+    boardAngleDeg: number;
+    segmentIndex: number | null;
+    segmentNumber: number | null;
+    area: string;
+    multiplier: number;
+    score: number;
+    withinDoubleOuter: boolean;
+    calibrationProfileId?: string;
+    rotationDeg?: number;
+    distanceToSegmentBoundaryDeg?: number | null;
+  };
+  componentDiagnostics?: {
+    area: number;
+    width: number;
+    height: number;
+    aspectRatio: number;
+    majorAxisLength: number;
+    minorAxisLength: number;
+    elongation: number;
+    centroid: { x: number; y: number };
+    maxDelta: number;
+    averageDelta: number;
+    persistenceCount: number;
+    boardOverlapRatio: number;
+    tipSelectionReason: string;
+  };
   reason?: string;
   alternateCandidateIds?: string[];
   calibrationProfileId?: string;

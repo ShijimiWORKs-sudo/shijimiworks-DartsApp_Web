@@ -76,6 +76,11 @@ export type BoardScoreResult = {
   score: number;
   normalizedX: number;
   normalizedY: number;
+  boardRadius: number;
+  boardAngleDeg: number;
+  segmentIndex: number | null;
+  distanceToSegmentBoundaryDeg: number | null;
+  withinDoubleOuter: boolean;
   alternateCandidates: {
     area: ScoreArea;
     segmentNumber: number | null;

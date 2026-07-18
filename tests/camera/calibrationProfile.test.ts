@@ -5,6 +5,8 @@ import { test } from 'node:test';
 
 import {
   applyPreviewMirror,
+  dartboardSegmentOrderClockwise,
+  dartboardSegmentWidthDeg,
   removePreviewMirror,
   scoreCanonicalPoint,
   scoreCanonicalPointInViewport,
@@ -121,6 +123,18 @@ test('score mapping handles center, T20, D16, S1 and rotation', () => {
     scoreToApproximateBoardPoint({ area: 'single', segmentNumber: 1, profile }),
     profile,
   );
+  const s19 = scoreCanonicalPoint(
+    scoreToApproximateBoardPoint({ area: 'single', segmentNumber: 19, profile }),
+    profile,
+  );
+  const s5 = scoreCanonicalPoint(
+    scoreToApproximateBoardPoint({ area: 'single', segmentNumber: 5, profile }),
+    profile,
+  );
+  const s20 = scoreCanonicalPoint(
+    scoreToApproximateBoardPoint({ area: 'single', segmentNumber: 20, profile }),
+    profile,
+  );
 
   assert.equal(center.area, 'inner_bull');
   assert.equal(t20.area, 'triple');
@@ -131,6 +145,10 @@ test('score mapping handles center, T20, D16, S1 and rotation', () => {
   assert.equal(d16.score, 32);
   assert.equal(s1.area, 'single');
   assert.equal(s1.segmentNumber, 1);
+  assert.equal(s19.area, 'single');
+  assert.equal(s19.segmentNumber, 19);
+  assert.equal(s20.segmentNumber, 20);
+  assert.equal(s5.segmentNumber, 5);
 
   const rotated = { ...profile, rotationDeg: 18 };
   const rotatedT20 = scoreCanonicalPoint(
@@ -138,6 +156,26 @@ test('score mapping handles center, T20, D16, S1 and rotation', () => {
     rotated,
   );
   assert.equal(rotatedT20.segmentNumber, 20);
+});
+
+test('segment boundaries use half-wedge positions and expose alternate candidates', () => {
+  const profile = createDefaultCalibrationProfile();
+  const boundary20And1 = scoreCanonicalPoint(pointAtBoardAngle(profile, 9), profile);
+  const center20 = scoreCanonicalPoint(pointAtBoardAngle(profile, 0), profile);
+  const boundary20And5 = scoreCanonicalPoint(pointAtBoardAngle(profile, -9), profile);
+
+  assert.equal(dartboardSegmentOrderClockwise.length, 20);
+  assert.equal(dartboardSegmentWidthDeg, 18);
+  assert.equal(center20.segmentNumber, 20);
+  assert.deepEqual(
+    boundary20And1.alternateCandidates.map((candidate) => candidate.segmentNumber),
+    [20, 1],
+  );
+  assert.deepEqual(
+    boundary20And5.alternateCandidates.map((candidate) => candidate.segmentNumber),
+    [5, 20],
+  );
+  assert.ok((boundary20And1.distanceToSegmentBoundaryDeg ?? 99) < 0.1);
 });
 
 test('viewport score mapping keeps overlay geometry and score geometry aligned', () => {
@@ -192,6 +230,11 @@ test('Calibration UI exposes save reload mirror drag scale rotation and ring con
   const store = readRepoFile('features/camera/calibration/application/calibrationProfileStore.ts');
 
   assert.match(route, /Camera Calibration/);
+  assert.match(route, /クリック判定ON/);
+  assert.match(route, /S19/);
+  assert.match(route, /S5/);
+  assert.match(route, /20\/1境界/);
+  assert.match(route, /20\/5境界/);
   assert.match(control, /映像を左右反転/);
   assert.match(control, /保存中\.\.\./);
   assert.match(control, /保存しました/);
@@ -211,6 +254,10 @@ test('Calibration UI exposes save reload mirror drag scale rotation and ring con
   assert.match(control, /Inner Bull外側/);
   assert.match(overlay, /Bull中心/);
   assert.match(overlay, /20方向回転/);
+  assert.match(overlay, /dartboardSegmentOrderClockwise/);
+  assert.match(overlay, /segmentCenterLine/);
+  assert.match(overlay, /segmentBoundaryLine/);
+  assert.match(overlay, /判定テストモード/);
   assert.match(store, /AsyncStorage/);
   assert.match(store, /LOCAL_COUNT_UP_CALIBRATION_PROFILE_KEY/);
 });
@@ -233,4 +280,16 @@ test('Calibration editor tracks save success failure and reload restoration', ()
 
 function readRepoFile(relativePath: string) {
   return readFileSync(path.join(root, relativePath), 'utf8');
+}
+
+function pointAtBoardAngle(
+  profile: ReturnType<typeof createDefaultCalibrationProfile>,
+  angleDeg: number,
+) {
+  const radius = (profile.outerBullRatio + profile.tripleInnerRatio) / 2;
+  const angle = (((angleDeg + profile.rotationDeg) % 360) * Math.PI) / 180;
+  return {
+    x: profile.centerX + Math.sin(angle) * radius * profile.outerRadius,
+    y: profile.centerY - Math.cos(angle) * radius * profile.outerRadius,
+  };
 }

@@ -5,6 +5,7 @@ import { StyleSheet, Text, View } from 'react-native';
 import { CameraPermissionCard } from './CameraPermissionCard';
 import { BoardCalibrationOverlay } from './BoardCalibrationOverlay';
 import type {
+  BoardScoreResult,
   BoardCalibrationProfile,
   CalibrationRingKey,
 } from '../../features/camera/calibration/domain/types';
@@ -25,6 +26,9 @@ type CameraPreviewSurfaceProps = {
   onRotate?: (deltaDeg: number) => void;
   onSetRotationDeg?: (rotationDeg: number) => void;
   onAdjustRing?: (ring: CalibrationRingKey, delta: number) => void;
+  showSegmentGuides?: boolean;
+  scoreTestEnabled?: boolean;
+  onScorePoint?: (score: BoardScoreResult) => void;
 };
 
 export function CameraPreviewSurface({
@@ -42,6 +46,9 @@ export function CameraPreviewSurface({
   onRotate,
   onSetRotationDeg,
   onAdjustRing,
+  showSegmentGuides,
+  scoreTestEnabled,
+  onScorePoint,
 }: CameraPreviewSurfaceProps) {
   const hasCameraPermission = cameraSession.permissionState === 'granted';
 
@@ -79,6 +86,9 @@ export function CameraPreviewSurface({
           onRotate={onRotate}
           onSetRotationDeg={onSetRotationDeg}
           onAdjustRing={onAdjustRing}
+          showSegmentGuides={showSegmentGuides}
+          scoreTestEnabled={scoreTestEnabled}
+          onScorePoint={onScorePoint}
         />
         {hasCameraPermission && !cameraSession.isReady ? (
           <View style={styles.readyBanner}>

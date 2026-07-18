@@ -3,6 +3,7 @@ import { StyleSheet, Text, View } from 'react-native';
 import { AppButton } from '../AppButton';
 import { colors } from '../../constants/theme';
 import type { CameraDetectionCandidate } from '../../features/camera/detection/domain/types';
+import type { DetectionCandidate } from '../../features/camera/lan/domain/protocol';
 
 export type CandidatePanelOption = {
   label: string;
@@ -38,6 +39,7 @@ export function CandidateConfirmationPanel({
   onAnalyzeCurrentFrame,
 }: CandidateConfirmationPanelProps) {
   const selected = candidates[selectedIndex] ?? null;
+  const selectedDiagnostics = selected?.candidate as Partial<DetectionCandidate> | undefined;
 
   return (
     <View testID="candidate-confirmation-panel">
@@ -55,6 +57,64 @@ export function CandidateConfirmationPanel({
             {selected.candidate.normalizedY.toFixed(3)}
           </Text>
           <Text style={styles.meta}>理由: {selected.reason}</Text>
+          {selectedDiagnostics?.scoreDiagnostics ? (
+            <View style={styles.diagnosticsGrid}>
+              <Text style={styles.meta}>
+                board radius {selectedDiagnostics.scoreDiagnostics.boardRadius.toFixed(3)} / angle{' '}
+                {selectedDiagnostics.scoreDiagnostics.boardAngleDeg.toFixed(1)}°
+              </Text>
+              <Text style={styles.meta}>
+                segment index{' '}
+                {selectedDiagnostics.scoreDiagnostics.segmentIndex == null
+                  ? '-'
+                  : selectedDiagnostics.scoreDiagnostics.segmentIndex}{' '}
+                / number {selectedDiagnostics.scoreDiagnostics.segmentNumber ?? '-'}
+              </Text>
+              <Text style={styles.meta}>
+                area {selectedDiagnostics.scoreDiagnostics.area} / multiplier{' '}
+                {selectedDiagnostics.scoreDiagnostics.multiplier} / score{' '}
+                {selectedDiagnostics.scoreDiagnostics.score}
+              </Text>
+              <Text style={styles.meta}>
+                Double外周内 {selectedDiagnostics.scoreDiagnostics.withinDoubleOuter ? 'yes' : 'no'}{' '}
+                / boundary{' '}
+                {selectedDiagnostics.scoreDiagnostics.distanceToSegmentBoundaryDeg == null
+                  ? '-'
+                  : `${selectedDiagnostics.scoreDiagnostics.distanceToSegmentBoundaryDeg.toFixed(
+                      1,
+                    )}°`}
+              </Text>
+              <Text style={styles.meta}>
+                profile {selectedDiagnostics.scoreDiagnostics.calibrationProfileId ?? '-'} /
+                rotation{' '}
+                {selectedDiagnostics.scoreDiagnostics.rotationDeg == null
+                  ? '-'
+                  : `${selectedDiagnostics.scoreDiagnostics.rotationDeg.toFixed(1)}°`}
+              </Text>
+            </View>
+          ) : null}
+          {selectedDiagnostics?.componentDiagnostics ? (
+            <View style={styles.diagnosticsGrid}>
+              <Text style={styles.meta}>
+                component box {formatBox(selectedDiagnostics.componentBoundingBox)} / elongation{' '}
+                {selectedDiagnostics.componentDiagnostics.elongation.toFixed(2)}
+              </Text>
+              <Text style={styles.meta}>
+                area {selectedDiagnostics.componentDiagnostics.area} / axis{' '}
+                {selectedDiagnostics.componentDiagnostics.majorAxisLength.toFixed(1)}×
+                {selectedDiagnostics.componentDiagnostics.minorAxisLength.toFixed(1)}
+              </Text>
+              <Text style={styles.meta}>
+                delta avg {selectedDiagnostics.componentDiagnostics.averageDelta.toFixed(1)} / max{' '}
+                {selectedDiagnostics.componentDiagnostics.maxDelta}
+              </Text>
+              <Text style={styles.meta}>
+                overlap{' '}
+                {(selectedDiagnostics.componentDiagnostics.boardOverlapRatio * 100).toFixed(0)}% /
+                tip {selectedDiagnostics.componentDiagnostics.tipSelectionReason}
+              </Text>
+            </View>
+          ) : null}
         </View>
       ) : (
         <Text style={styles.meta}>候補はありません。手動補正またはMISSで続行できます。</Text>
@@ -109,6 +169,13 @@ export function CandidateConfirmationPanel({
   );
 }
 
+function formatBox(box: Partial<DetectionCandidate>['componentBoundingBox']) {
+  if (!box) {
+    return '-';
+  }
+  return `${box.x.toFixed(3)},${box.y.toFixed(3)} ${box.width.toFixed(3)}×${box.height.toFixed(3)}`;
+}
+
 function formatCandidate(candidate: CameraDetectionCandidate) {
   if (candidate.multiplier === 0) {
     return 'MISS';
@@ -149,6 +216,10 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '800',
     lineHeight: 18,
+  },
+  diagnosticsGrid: {
+    marginTop: 8,
+    gap: 2,
   },
   actionGrid: {
     gap: 10,

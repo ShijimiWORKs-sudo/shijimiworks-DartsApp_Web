@@ -193,6 +193,24 @@ test('camera COUNT-UP baseline recapture resets stale persistent state', () => {
   assert.match(resetBlock, /persistentBoundingBoxRef\.current = null/);
 });
 
+test('camera COUNT-UP displays candidate markers and score diagnostics', () => {
+  const play = readRepoFile('app/camera/local-count-up/[gameId]/index.tsx');
+  const panel = readRepoFile('components/camera/CandidateConfirmationPanel.tsx');
+  const marker = readRepoFile('components/camera/CandidateMarkerOverlay.tsx');
+
+  assert.match(play, /CandidateMarkerOverlay/);
+  assert.match(play, /candidates=\{candidateOptions\.map\(\(option\) => option\.candidate\)\}/);
+  assert.match(panel, /board radius/);
+  assert.match(panel, /segment index/);
+  assert.match(panel, /Double外周内/);
+  assert.match(panel, /component box/);
+  assert.match(panel, /tipSelectionReason/);
+  assert.match(marker, /candidate-marker-overlay/);
+  assert.match(marker, /crossHorizontal/);
+  assert.match(marker, /boundingBox/);
+  assert.match(marker, /fittedAxis/);
+});
+
 test('camera COUNT-UP monitor uses two stage resolution and treats no significant change as nonfatal', () => {
   const play = readRepoFile('app/camera/local-count-up/[gameId]/index.tsx');
 

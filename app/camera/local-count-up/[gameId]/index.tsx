@@ -9,6 +9,7 @@ import {
   CandidateConfirmationPanel,
   type CandidatePanelOption,
 } from '../../../../components/camera/CandidateConfirmationPanel';
+import { CandidateMarkerOverlay } from '../../../../components/camera/CandidateMarkerOverlay';
 import { CameraPreviewSurface } from '../../../../components/camera/CameraPreviewSurface';
 import { ManualScoreCorrectionPanel } from '../../../../components/camera/ManualScoreCorrectionPanel';
 import { Card } from '../../../../components/Card';
@@ -936,7 +937,12 @@ export default function CameraLocalCountUpPlayScreen() {
             cameraSession={cameraSession}
             profile={calibrationEditor.profile}
             selectedRing={calibrationEditor.selectedRing}
-          />
+          >
+            <CandidateMarkerOverlay
+              profile={calibrationEditor.profile}
+              candidates={candidateOptions.map((option) => option.candidate)}
+            />
+          </CameraPreviewSurface>
           <Card muted>
             <Text style={styles.meta}>
               Calibration: {calibrationEditor.status} / mirror{' '}
@@ -1252,7 +1258,9 @@ function createCandidateOptionsFromResult(
   return [result.candidate, ...result.alternateCandidates].slice(0, 3).map((candidate, index) => ({
     label: ['第一候補', '第二候補', '第三候補'][index] ?? `候補${index + 1}`,
     candidate,
-    reason: `実カメラframe absdiff / changed ${(result.changedPixelRatio * 100).toFixed(1)}%`,
+    reason:
+      candidate.componentDiagnostics?.tipSelectionReason ??
+      `実カメラcomponent diff / changed ${(result.changedPixelRatio * 100).toFixed(1)}%`,
   }));
 }
 

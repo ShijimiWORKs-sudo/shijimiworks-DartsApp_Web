@@ -8,9 +8,11 @@ import type {
   ScoreArea,
 } from './types';
 
-const wedgeOrderClockwise = [
+export const dartboardSegmentOrderClockwise = [
   20, 1, 18, 4, 13, 6, 10, 15, 2, 17, 3, 19, 7, 16, 8, 11, 14, 9, 12, 5,
 ] as const;
+
+export const dartboardSegmentWidthDeg = 18;
 
 export function applyPreviewMirror(
   point: NormalizedPoint,
@@ -72,19 +74,19 @@ export function boardPointToScore(
   },
 ): BoardScoreResult {
   if (point.radius > profile.doubleOuterRatio) {
-    return createScoreResult('miss', null, 0, 0, sourcePoint, []);
+    return createScoreResult('miss', null, 0, 0, point, sourcePoint, []);
   }
   if (point.radius <= profile.innerBullRatio) {
-    return createScoreResult('inner_bull', null, 2, 50, sourcePoint, []);
+    return createScoreResult('inner_bull', null, 2, 50, point, sourcePoint, []);
   }
   if (point.radius <= profile.outerBullRatio) {
-    return createScoreResult('outer_bull', null, 1, 25, sourcePoint, [
+    return createScoreResult('outer_bull', null, 1, 25, point, sourcePoint, [
       { area: 'inner_bull', segmentNumber: null, multiplier: 2, score: 50 },
     ]);
   }
 
-  const segmentNumber =
-    wedgeOrderClockwise[Math.round(point.angleDeg / 18) % wedgeOrderClockwise.length];
+  const segmentIndex = resolveSegmentIndex(point.angleDeg);
+  const segmentNumber = dartboardSegmentOrderClockwise[segmentIndex];
   const alternateCandidates = resolveAdjacentSegments(point.angleDeg).map((segment) => ({
     area: 'single' as const,
     segmentNumber: segment,
@@ -98,6 +100,7 @@ export function boardPointToScore(
       segmentNumber,
       2,
       segmentNumber * 2,
+      point,
       sourcePoint,
       alternateCandidates,
     );
@@ -108,6 +111,7 @@ export function boardPointToScore(
       segmentNumber,
       3,
       segmentNumber * 3,
+      point,
       sourcePoint,
       alternateCandidates,
     );
@@ -117,6 +121,7 @@ export function boardPointToScore(
     segmentNumber,
     1,
     segmentNumber,
+    point,
     sourcePoint,
     alternateCandidates,
   );
@@ -164,8 +169,9 @@ export function scoreToApproximateBoardPointInViewport(
   const segmentIndex =
     input.segmentNumber == null
       ? 0
-      : Math.max(0, wedgeOrderClockwise.indexOf(input.segmentNumber as never));
-  const angle = (((segmentIndex * 18 + input.profile.rotationDeg) % 360) * Math.PI) / 180;
+      : Math.max(0, dartboardSegmentOrderClockwise.indexOf(input.segmentNumber as never));
+  const angle =
+    (((segmentIndex * dartboardSegmentWidthDeg + input.profile.rotationDeg) % 360) * Math.PI) / 180;
   const transform = getCalibrationViewportTransform(input);
   const pointXPx =
     transform.canonicalCenterXPx + Math.sin(angle) * radius * transform.outerRadiusPx;
@@ -267,9 +273,11 @@ function createScoreResult(
   segmentNumber: number | null,
   multiplier: 0 | 1 | 2 | 3,
   score: number,
+  boardPoint: BoardPoint,
   point: NormalizedPoint,
   alternateCandidates: BoardScoreResult['alternateCandidates'],
 ): BoardScoreResult {
+  const segmentIndex = segmentNumber == null ? null : resolveSegmentIndex(boardPoint.angleDeg);
   return {
     area,
     segmentNumber,
@@ -277,20 +285,39 @@ function createScoreResult(
     score,
     normalizedX: point.x,
     normalizedY: point.y,
+    boardRadius: boardPoint.radius,
+    boardAngleDeg: boardPoint.angleDeg,
+    segmentIndex,
+    distanceToSegmentBoundaryDeg:
+      segmentNumber == null ? null : getDistanceToNearestSegmentBoundaryDeg(boardPoint.angleDeg),
+    withinDoubleOuter: boardPoint.radius <= 1,
     alternateCandidates,
   };
 }
 
+export function resolveSegmentIndex(angleDeg: number) {
+  return (
+    Math.round(normalizeDeg(angleDeg) / dartboardSegmentWidthDeg) %
+    dartboardSegmentOrderClockwise.length
+  );
+}
+
+export function getDistanceToNearestSegmentBoundaryDeg(angleDeg: number) {
+  const exact = normalizeDeg(angleDeg) / dartboardSegmentWidthDeg;
+  const fraction = exact - Math.floor(exact);
+  return Math.abs(fraction - 0.5) * dartboardSegmentWidthDeg;
+}
+
 function resolveAdjacentSegments(angleDeg: number) {
-  const exact = angleDeg / 18;
-  if (Math.abs(exact - Math.round(exact)) > 0.08) {
+  const exact = normalizeDeg(angleDeg) / dartboardSegmentWidthDeg;
+  const lowerCenter = Math.floor(exact);
+  const distanceToBoundary = Math.abs(exact - (lowerCenter + 0.5));
+  if (distanceToBoundary > 0.08) {
     return [];
   }
-  const center = Math.round(exact);
-  return [
-    wedgeOrderClockwise[(center + 19) % wedgeOrderClockwise.length],
-    wedgeOrderClockwise[(center + 1) % wedgeOrderClockwise.length],
-  ];
+  const leftCenter = lowerCenter % dartboardSegmentOrderClockwise.length;
+  const rightCenter = (lowerCenter + 1) % dartboardSegmentOrderClockwise.length;
+  return [dartboardSegmentOrderClockwise[leftCenter], dartboardSegmentOrderClockwise[rightCenter]];
 }
 
 function normalizeDeg(value: number) {

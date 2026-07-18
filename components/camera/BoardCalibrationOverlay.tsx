@@ -6,8 +6,14 @@ import { colors } from '../../constants/theme';
 import type {
   BoardCalibrationProfile,
   CalibrationRingKey,
+  BoardScoreResult,
 } from '../../features/camera/calibration/domain/types';
-import { getCalibrationViewportTransform } from '../../features/camera/calibration/domain/coordinateTransform';
+import {
+  dartboardSegmentOrderClockwise,
+  dartboardSegmentWidthDeg,
+  getCalibrationViewportTransform,
+  scoreCanonicalPoint,
+} from '../../features/camera/calibration/domain/coordinateTransform';
 
 type BoardCalibrationOverlayProps = {
   profile: BoardCalibrationProfile;
@@ -21,6 +27,9 @@ type BoardCalibrationOverlayProps = {
   onRotate?: (deltaDeg: number) => void;
   onSetRotationDeg?: (rotationDeg: number) => void;
   onAdjustRing?: (ring: CalibrationRingKey, delta: number) => void;
+  showSegmentGuides?: boolean;
+  scoreTestEnabled?: boolean;
+  onScorePoint?: (score: BoardScoreResult) => void;
 };
 
 type DragMode = 'center' | 'outer' | 'rotation';
@@ -51,6 +60,9 @@ export function BoardCalibrationOverlay({
   onRotate,
   onSetRotationDeg,
   onAdjustRing,
+  showSegmentGuides = true,
+  scoreTestEnabled = false,
+  onScorePoint,
 }: BoardCalibrationOverlayProps) {
   const [layout, setLayout] = useState({ width: 1, height: 1 });
   const transform = useMemo(
@@ -96,6 +108,17 @@ export function BoardCalibrationOverlay({
     updateFromPointer(mode, event);
   };
 
+  const handleScoreTestPress = (event: GestureResponderEvent) => {
+    if (!scoreTestEnabled) {
+      return;
+    }
+    const canonical = transform.screenToCanonical({
+      x: event.nativeEvent.locationX,
+      y: event.nativeEvent.locationY,
+    });
+    onScorePoint?.(scoreCanonicalPoint(canonical, profile));
+  };
+
   const webInteractionProps =
     Platform.OS === 'web'
       ? ({
@@ -130,6 +153,70 @@ export function BoardCalibrationOverlay({
       style={styles.overlay}
       testID="board-calibration-overlay"
     >
+      {showSegmentGuides ? (
+        <View pointerEvents="none" style={styles.segmentLayer}>
+          {dartboardSegmentOrderClockwise.map((segmentNumber, index) => {
+            const centerAngle = index * dartboardSegmentWidthDeg + profile.rotationDeg;
+            const label = transform.canonicalToScreen(
+              boardPolarToCanonical(centerAngle, profile.doubleOuterRatio * 0.9, transform),
+            );
+            return (
+              <View key={`segment-${segmentNumber}`}>
+                <View
+                  style={[
+                    styles.segmentCenterLine,
+                    {
+                      left: transform.centerXPx - transform.outerRadiusPx,
+                      top: transform.centerYPx,
+                      width: transform.outerRadiusPx * 2,
+                      transform: [{ rotate: `${centerAngle - 90}deg` }],
+                    },
+                  ]}
+                />
+                <Text
+                  style={[
+                    styles.segmentLabel,
+                    {
+                      left: label.x,
+                      top: label.y,
+                    },
+                  ]}
+                >
+                  {segmentNumber}
+                </Text>
+              </View>
+            );
+          })}
+          {dartboardSegmentOrderClockwise.map((segmentNumber, index) => {
+            const boundaryAngle =
+              index * dartboardSegmentWidthDeg + dartboardSegmentWidthDeg / 2 + profile.rotationDeg;
+            return (
+              <View
+                key={`boundary-${segmentNumber}`}
+                style={[
+                  styles.segmentBoundaryLine,
+                  {
+                    left: transform.centerXPx - transform.outerRadiusPx,
+                    top: transform.centerYPx,
+                    width: transform.outerRadiusPx * 2,
+                    transform: [{ rotate: `${boundaryAngle - 90}deg` }],
+                  },
+                ]}
+              />
+            );
+          })}
+        </View>
+      ) : null}
+
+      {scoreTestEnabled ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="判定テストモード"
+          onPress={handleScoreTestPress}
+          style={styles.scoreTestLayer}
+        />
+      ) : null}
+
       {ringStyles.map((ring) => {
         const normalizedRadius =
           ring.key === 'outer'
@@ -224,9 +311,55 @@ export function BoardCalibrationOverlay({
   );
 }
 
+function boardPolarToCanonical(
+  angleDeg: number,
+  radius: number,
+  transform: ReturnType<typeof getCalibrationViewportTransform>,
+) {
+  const angle = (angleDeg * Math.PI) / 180;
+  return {
+    x:
+      (transform.canonicalCenterXPx + Math.sin(angle) * radius * transform.outerRadiusPx) /
+      transform.containerWidth,
+    y:
+      (transform.canonicalCenterYPx - Math.cos(angle) * radius * transform.outerRadiusPx) /
+      transform.containerHeight,
+  };
+}
+
 const styles = StyleSheet.create({
   overlay: {
     ...StyleSheet.absoluteFillObject,
+  },
+  segmentLayer: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  segmentCenterLine: {
+    position: 'absolute',
+    height: 1,
+    backgroundColor: 'rgba(59,130,246,0.42)',
+  },
+  segmentBoundaryLine: {
+    position: 'absolute',
+    height: 1,
+    backgroundColor: 'rgba(255,255,255,0.34)',
+  },
+  segmentLabel: {
+    position: 'absolute',
+    minWidth: 20,
+    marginLeft: -10,
+    marginTop: -10,
+    textAlign: 'center',
+    color: '#ffffff',
+    fontSize: 11,
+    fontWeight: '900',
+    textShadowColor: 'rgba(0,0,0,0.85)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
+  },
+  scoreTestLayer: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 20,
   },
   ring: {
     position: 'absolute',
