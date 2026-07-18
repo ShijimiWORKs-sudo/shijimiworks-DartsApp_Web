@@ -113,6 +113,21 @@ export function CandidateConfirmationPanel({
                 {(selectedDiagnostics.componentDiagnostics.boardOverlapRatio * 100).toFixed(0)}% /
                 tip {selectedDiagnostics.componentDiagnostics.tipSelectionReason}
               </Text>
+              <Text style={styles.meta}>
+                dart likelihood{' '}
+                {(selectedDiagnostics.componentDiagnostics.dartLikelihood * 100).toFixed(0)}% /
+                shadow likelihood{' '}
+                {(selectedDiagnostics.componentDiagnostics.shadowLikelihood * 100).toFixed(0)}%
+              </Text>
+              <Text style={styles.meta}>
+                edge sharpness {selectedDiagnostics.componentDiagnostics.edgeSharpness.toFixed(1)} /
+                width {selectedDiagnostics.componentDiagnostics.averageWidth.toFixed(1)} / skeleton{' '}
+                {selectedDiagnostics.componentDiagnostics.skeletonLength.toFixed(1)}
+              </Text>
+              <Text style={styles.meta}>
+                core box {formatBox(selectedDiagnostics.narrowCoreBoundingBox)} / rejection{' '}
+                {selectedDiagnostics.componentDiagnostics.rejectionReason ?? '-'}
+              </Text>
             </View>
           ) : null}
         </View>

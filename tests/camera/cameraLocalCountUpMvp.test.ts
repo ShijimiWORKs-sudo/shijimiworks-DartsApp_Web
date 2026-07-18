@@ -205,10 +205,19 @@ test('camera COUNT-UP displays candidate markers and score diagnostics', () => {
   assert.match(panel, /Double外周内/);
   assert.match(panel, /component box/);
   assert.match(panel, /tipSelectionReason/);
+  assert.match(panel, /dart likelihood/);
+  assert.match(panel, /shadow likelihood/);
+  assert.match(panel, /edge sharpness/);
+  assert.match(panel, /skeleton/);
+  assert.match(panel, /rejection/);
   assert.match(marker, /candidate-marker-overlay/);
   assert.match(marker, /crossHorizontal/);
   assert.match(marker, /boundingBox/);
+  assert.match(marker, /shadowBox/);
+  assert.match(marker, /coreBox/);
   assert.match(marker, /fittedAxis/);
+  assert.match(marker, /rejectedShadowComponents/);
+  assert.match(marker, /narrowCoreBoundingBox/);
 });
 
 test('camera COUNT-UP monitor uses two stage resolution and treats no significant change as nonfatal', () => {

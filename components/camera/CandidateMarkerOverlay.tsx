@@ -40,6 +40,23 @@ export function CandidateMarkerOverlay({ profile, candidates }: CandidateMarkerO
       style={styles.overlay}
       testID="candidate-marker-overlay"
     >
+      {collectRejectedShadowComponents(candidates).map((shadow, index) => {
+        const box = toScreenBox(shadow.boundingBox, transform);
+        return (
+          <View
+            key={`shadow-${index}-${shadow.boundingBox.x}-${shadow.boundingBox.y}`}
+            style={[
+              styles.shadowBox,
+              {
+                left: box.left,
+                top: box.top,
+                width: box.width,
+                height: box.height,
+              },
+            ]}
+          />
+        );
+      })}
       {candidates.slice(0, 3).map((candidate, index) => {
         const diagnosticCandidate = candidate as Partial<DetectionCandidate>;
         const color = markerColors[index] ?? '#ffffff';
@@ -56,6 +73,9 @@ export function CandidateMarkerOverlay({ profile, candidates }: CandidateMarkerO
               end: transform.canonicalToScreen(diagnosticCandidate.fittedAxis.end),
             }
           : null;
+        const coreBox = diagnosticCandidate.narrowCoreBoundingBox
+          ? toScreenBox(diagnosticCandidate.narrowCoreBoundingBox, transform)
+          : null;
         return (
           <View key={candidate.candidateId}>
             {box ? (
@@ -68,6 +88,20 @@ export function CandidateMarkerOverlay({ profile, candidates }: CandidateMarkerO
                     top: box.top,
                     width: box.width,
                     height: box.height,
+                  },
+                ]}
+              />
+            ) : null}
+            {coreBox ? (
+              <View
+                style={[
+                  styles.coreBox,
+                  {
+                    borderColor: color,
+                    left: coreBox.left,
+                    top: coreBox.top,
+                    width: coreBox.width,
+                    height: coreBox.height,
                   },
                 ]}
               />
@@ -124,6 +158,22 @@ export function CandidateMarkerOverlay({ profile, candidates }: CandidateMarkerO
   );
 }
 
+function collectRejectedShadowComponents(candidates: CameraDetectionCandidate[]) {
+  const seen = new Set<string>();
+  const shadows: NonNullable<DetectionCandidate['rejectedShadowComponents']> = [];
+  for (const candidate of candidates) {
+    const diagnosticCandidate = candidate as Partial<DetectionCandidate>;
+    for (const shadow of diagnosticCandidate.rejectedShadowComponents ?? []) {
+      const key = `${shadow.boundingBox.x.toFixed(3)}-${shadow.boundingBox.y.toFixed(3)}-${shadow.boundingBox.width.toFixed(3)}-${shadow.boundingBox.height.toFixed(3)}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        shadows.push(shadow);
+      }
+    }
+  }
+  return shadows;
+}
+
 function toScreenBox(
   box: { x: number; y: number; width: number; height: number },
   transform: ReturnType<typeof getCalibrationViewportTransform>,
@@ -169,6 +219,17 @@ const styles = StyleSheet.create({
     position: 'absolute',
     borderWidth: 2,
     backgroundColor: 'rgba(0,0,0,0.02)',
+  },
+  shadowBox: {
+    position: 'absolute',
+    borderWidth: 2,
+    borderColor: 'rgba(148,163,184,0.85)',
+    backgroundColor: 'rgba(148,163,184,0.18)',
+  },
+  coreBox: {
+    position: 'absolute',
+    borderWidth: 2,
+    backgroundColor: 'rgba(255,255,255,0.05)',
   },
   axis: {
     position: 'absolute',

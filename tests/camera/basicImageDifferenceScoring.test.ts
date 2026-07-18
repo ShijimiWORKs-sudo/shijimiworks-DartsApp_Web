@@ -215,12 +215,132 @@ test('basic image difference rejects area noise and does not promote single pixe
   assert.equal(areaNoiseResult.status, 'no_candidate');
 });
 
+test('basic image difference rejects broad low-elongation shadow components', () => {
+  const profile = createDefaultCalibrationProfile();
+  const baselineFrame = createLitFrame(180, 120, 180);
+  const thrownFrame = createLitFrame(180, 120, 180);
+  const s16 = scoreToApproximateBoardPoint({ area: 'single', segmentNumber: 16, profile });
+  drawBlurredShadow(thrownFrame, s16, { rx: 0.075, ry: 0.048 }, 74);
+
+  const result = analyzeImageDifference({
+    sessionId: 'shadow-only',
+    cameraNodeId: 'camera-node',
+    throwIndex: 1,
+    baselineFrame,
+    thrownFrame,
+    calibration: profile,
+    threshold: 18,
+  });
+
+  assert.equal(result.status, 'no_candidate');
+});
+
+test('basic image difference ranks a clear S11 dart above an S16 shadow', () => {
+  const profile = createDefaultCalibrationProfile();
+  const baselineFrame = createLitFrame(180, 120, 180);
+  const thrownFrame = createLitFrame(180, 120, 180);
+  const s11 = scoreToApproximateBoardPoint({ area: 'single', segmentNumber: 11, profile });
+  const s16 = scoreToApproximateBoardPoint({ area: 'single', segmentNumber: 16, profile });
+  drawBlurredShadow(thrownFrame, s16, { rx: 0.07, ry: 0.05 }, 70);
+  drawSyntheticDart(thrownFrame, s11, extendOutward(profile, s11, 0.22), 255);
+
+  const result = analyzeImageDifference({
+    sessionId: 's11-shadow-regression',
+    cameraNodeId: 'camera-node',
+    throwIndex: 1,
+    baselineFrame,
+    thrownFrame,
+    calibration: profile,
+    threshold: 18,
+    now: new Date('2026-07-18T00:00:00.000Z'),
+    random: () => 0.2,
+  });
+
+  assert.equal(result.status, 'candidate');
+  if (result.status === 'candidate') {
+    assert.equal(result.candidate.segment, 11);
+    assert.notEqual(result.candidate.segment, 16);
+    assert.ok(result.candidate.componentDiagnostics);
+    assert.ok(result.candidate.componentDiagnostics.dartLikelihood > 0.35);
+    assert.ok(result.candidate.componentDiagnostics.shadowLikelihood < 0.66);
+    assert.ok(result.candidate.componentDiagnostics.skeletonLength > 0);
+    assert.ok(result.candidate.narrowCoreBoundingBox);
+    assert.ok(result.candidate.rejectedShadowComponents?.length);
+  }
+});
+
+test('basic image difference separates a narrow dart core from a joined soft shadow', () => {
+  const profile = createDefaultCalibrationProfile();
+  const baselineFrame = createLitFrame(180, 120, 180);
+  const thrownFrame = createLitFrame(180, 120, 180);
+  const s11 = scoreToApproximateBoardPoint({ area: 'single', segmentNumber: 11, profile });
+  drawBlurredShadow(thrownFrame, s11, { rx: 0.075, ry: 0.052 }, 88);
+  drawSyntheticDart(thrownFrame, s11, extendOutward(profile, s11, 0.22), 255);
+
+  const result = analyzeImageDifference({
+    sessionId: 'joined-shadow-core',
+    cameraNodeId: 'camera-node',
+    throwIndex: 1,
+    baselineFrame,
+    thrownFrame,
+    calibration: profile,
+    threshold: 18,
+  });
+
+  assert.equal(result.status, 'candidate');
+  if (result.status === 'candidate') {
+    const diagnostics = result.candidate.componentDiagnostics;
+    assert.ok(diagnostics);
+    assert.equal(result.candidate.segment, 11);
+    assert.ok(result.candidate.narrowCoreBoundingBox);
+    assert.ok(diagnostics.skeletonLength > 5);
+    assert.ok(diagnostics.dartLikelihood > diagnostics.shadowLikelihood);
+    assert.match(diagnostics.tipSelectionReason, /narrow core axis/);
+  }
+});
+
+test('basic image difference does not pad candidate list with same-position alternates', () => {
+  const profile = createDefaultCalibrationProfile();
+  const baselineFrame = createFrame(160, 120);
+  const thrownFrame = createFrame(160, 120);
+  const s20 = scoreToApproximateBoardPoint({ area: 'single', segmentNumber: 20, profile });
+  drawSyntheticDart(thrownFrame, s20, extendOutward(profile, s20, 0.24), 255);
+
+  const result = analyzeImageDifference({
+    sessionId: 'single-real-candidate',
+    cameraNodeId: 'camera-node',
+    throwIndex: 1,
+    baselineFrame,
+    thrownFrame,
+    calibration: profile,
+    threshold: 20,
+  });
+
+  assert.equal(result.status, 'candidate');
+  if (result.status === 'candidate') {
+    const candidates = [result.candidate, ...result.alternateCandidates];
+    assert.ok(candidates.length < 3);
+    for (let index = 1; index < candidates.length; index += 1) {
+      assert.ok(
+        normalizedDistance(candidates[0], candidates[index]) >= 0.045,
+        'near duplicate candidate should be suppressed',
+      );
+    }
+  }
+});
+
 function createFrame(width: number, height: number) {
   return {
     width,
     height,
     pixels: new Uint8ClampedArray(width * height),
   };
+}
+
+function createLitFrame(width: number, height: number, intensity: number) {
+  const frame = createFrame(width, height);
+  frame.pixels.fill(intensity);
+  return frame;
 }
 
 function drawSyntheticDart(
@@ -261,6 +381,42 @@ function drawPatch(
       }
     }
   }
+}
+
+function drawBlurredShadow(
+  frame: ReturnType<typeof createFrame>,
+  center: { x: number; y: number },
+  size: { rx: number; ry: number },
+  intensity: number,
+) {
+  const cx = center.x * (frame.width - 1);
+  const cy = center.y * (frame.height - 1);
+  const rx = size.rx * frame.width;
+  const ry = size.ry * frame.height;
+  for (let y = Math.floor(cy - ry); y <= Math.ceil(cy + ry); y += 1) {
+    for (let x = Math.floor(cx - rx); x <= Math.ceil(cx + rx); x += 1) {
+      if (x < 0 || y < 0 || x >= frame.width || y >= frame.height) {
+        continue;
+      }
+      const distanceRatio = ((x - cx) / rx) ** 2 + ((y - cy) / ry) ** 2;
+      if (distanceRatio <= 1) {
+        const falloff = 1 - Math.min(1, distanceRatio);
+        const existing = frame.pixels[y * frame.width + x];
+        frame.pixels[y * frame.width + x] = Math.round(
+          existing * (1 - falloff * 0.55) + intensity * falloff * 0.55,
+        );
+      }
+    }
+  }
+}
+
+function normalizedDistance(
+  first: { normalizedX: number; normalizedY: number },
+  second: { normalizedX: number; normalizedY: number },
+) {
+  return Math.sqrt(
+    (first.normalizedX - second.normalizedX) ** 2 + (first.normalizedY - second.normalizedY) ** 2,
+  );
 }
 
 function extendOutward(

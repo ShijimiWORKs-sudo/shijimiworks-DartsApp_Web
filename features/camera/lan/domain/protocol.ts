@@ -122,6 +122,12 @@ export type DetectionCandidate = Omit<TestDetectionCandidate, 'type'> & {
     score: number;
     reason: string;
   }[];
+  narrowCoreBoundingBox?: { x: number; y: number; width: number; height: number } | null;
+  rejectedShadowComponents?: {
+    boundingBox: { x: number; y: number; width: number; height: number };
+    shadowLikelihood: number;
+    rejectionReason: string;
+  }[];
   scoreDiagnostics?: {
     normalizedX: number;
     normalizedY: number;
@@ -150,6 +156,22 @@ export type DetectionCandidate = Omit<TestDetectionCandidate, 'type'> & {
     averageDelta: number;
     persistenceCount: number;
     boardOverlapRatio: number;
+    averageWidth: number;
+    widthVariance: number;
+    edgeSharpness: number;
+    edgeDensity: number;
+    localContrast: number;
+    gradientMagnitude: number;
+    solidity: number;
+    compactness: number;
+    interiorBrightnessVariance: number;
+    boundaryBlur: number;
+    darkeningPolarity: number;
+    skeletonLength: number;
+    skeletonBranchCount: number;
+    dartLikelihood: number;
+    shadowLikelihood: number;
+    rejectionReason: string | null;
     tipSelectionReason: string;
   };
   reason?: string;

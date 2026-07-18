@@ -46,6 +46,29 @@ export type DartComponentFeature = {
   averageDelta: number;
   persistenceCount: number;
   boardOverlapRatio: number;
+  averageWidth: number;
+  widthVariance: number;
+  edgeSharpness: number;
+  edgeDensity: number;
+  localContrast: number;
+  gradientMagnitude: number;
+  solidity: number;
+  compactness: number;
+  interiorBrightnessVariance: number;
+  boundaryBlur: number;
+  darkeningPolarity: number;
+  skeletonLength: number;
+  skeletonBranchCount: number;
+  dartLikelihood: number;
+  shadowLikelihood: number;
+  rejectionReason: string | null;
+  narrowCore: {
+    pixels: { x: number; y: number; delta: number }[];
+    boundingBox: ComponentBoundingBox | null;
+    axis: { start: { x: number; y: number }; end: { x: number; y: number } } | null;
+    majorAxisLength: number;
+    isBrightCore: boolean;
+  };
   axis: { start: { x: number; y: number }; end: { x: number; y: number } };
   pixels: { x: number; y: number; delta: number }[];
 };
@@ -110,6 +133,7 @@ export function analyzeImageDifference(
     deltas: difference.deltas,
     input,
     roiMask,
+    threshold,
   });
 
   const changedPixelCount = countMaskPixels(closedMask);
@@ -121,8 +145,17 @@ export function analyzeImageDifference(
     };
   }
 
-  const tips = components.flatMap((component) => createTipCandidates(input, component, threshold));
-  const rankedTips = rankTipCandidates(tips).slice(0, 3);
+  const rejectedShadowComponents = components.filter(
+    (component) =>
+      component.shadowLikelihood >= 0.58 ||
+      (component.narrowCore.isBrightCore &&
+        component.averageWidth >= 7 &&
+        component.shadowLikelihood >= 0.34),
+  );
+  const tips = components
+    .filter(isDartCandidateComponent)
+    .flatMap((component) => createTipCandidates(input, component, threshold));
+  const rankedTips = suppressNearbyTips(rankTipCandidates(tips)).slice(0, 3);
   if (rankedTips.length === 0) {
     return {
       status: 'no_candidate',
@@ -134,6 +167,7 @@ export function analyzeImageDifference(
   const candidates = createCandidatesFromTips(input, rankedTips, {
     changedPixelRatio: changedPixelCount / input.thrownFrame.pixels.length,
     globalBoundingBox: createGlobalBoundingBox(components, input.thrownFrame),
+    rejectedShadowComponents,
     processingMs: Date.now() - startedAt,
   }).slice(0, 3);
 
@@ -275,6 +309,7 @@ function extractConnectedComponents(input: {
   deltas: Uint8Array;
   input: BasicImageDifferenceInput;
   roiMask: Uint8Array;
+  threshold: number;
 }) {
   const width = input.input.thrownFrame.width;
   const height = input.input.thrownFrame.height;
@@ -298,14 +333,19 @@ function extractConnectedComponents(input: {
       frameHeight: height,
       input: input.input,
       roiMask: input.roiMask,
+      deltas: input.deltas,
+      threshold: input.threshold,
     });
-    if (feature.boardOverlapRatio < 0.35 || feature.elongation < 1.45) {
+    if (feature.boardOverlapRatio < 0.35) {
       continue;
     }
     components.push(feature);
   }
 
-  return components.sort((a, b) => b.elongation * b.averageDelta - a.elongation * a.averageDelta);
+  return components.sort(
+    (a, b) =>
+      b.dartLikelihood * (1 - b.shadowLikelihood) - a.dartLikelihood * (1 - a.shadowLikelihood),
+  );
 }
 
 function floodFillComponent(
@@ -356,6 +396,8 @@ function createComponentFeature(input: {
   frameHeight: number;
   input: BasicImageDifferenceInput;
   roiMask: Uint8Array;
+  deltas: Uint8Array;
+  threshold: number;
 }): DartComponentFeature {
   const minX = Math.min(...input.pixels.map((pixel) => pixel.x));
   const maxX = Math.max(...input.pixels.map((pixel) => pixel.x));
@@ -380,6 +422,7 @@ function createComponentFeature(input: {
   const area = input.pixels.length;
   const width = maxX - minX + 1;
   const height = maxY - minY + 1;
+  const bboxArea = width * height;
   const boundingBox = {
     x: minX / input.frameWidth,
     y: minY / input.frameHeight,
@@ -389,6 +432,72 @@ function createComponentFeature(input: {
   const roiPixels = input.pixels.filter(
     (pixel) => input.roiMask[pixel.y * input.frameWidth + pixel.x],
   ).length;
+  const pixelSet = createPixelSet(input.pixels, input.frameWidth);
+  const boundaryPixels = input.pixels.filter((pixel) =>
+    isBoundaryPixel(pixel, pixelSet, input.frameWidth, input.frameHeight),
+  );
+  const edgeDensity = boundaryPixels.length / Math.max(1, area);
+  const edgeSharpness = getAverageBoundarySharpness(
+    boundaryPixels,
+    input.deltas,
+    input.frameWidth,
+    input.frameHeight,
+  );
+  const gradientMagnitude = getAverageGradientMagnitude(
+    input.pixels,
+    input.deltas,
+    input.frameWidth,
+    input.frameHeight,
+  );
+  const averageDelta = input.pixels.reduce((total, pixel) => total + pixel.delta, 0) / area;
+  const deltaVariance = variance(input.pixels.map((pixel) => pixel.delta));
+  const averageWidth = area / Math.max(1, majorAxisLength);
+  const widthVariance = calculateWidthVariance(input.pixels, centroid, axis.vector);
+  const solidity = area / Math.max(1, bboxArea);
+  const compactness = (4 * Math.PI * area) / Math.max(1, boundaryPixels.length ** 2);
+  const darkeningPolarity = getDarkeningPolarity(input.pixels, input.input, input.frameWidth);
+  const narrowCore = extractNarrowCore({
+    pixels: input.pixels,
+    frameWidth: input.frameWidth,
+    frameHeight: input.frameHeight,
+    sourceInput: input.input,
+    averageDelta,
+    maxDelta: Math.max(...input.pixels.map((pixel) => pixel.delta)),
+  });
+  const skeletonLength = narrowCore.majorAxisLength;
+  const skeletonBranchCount = estimateSkeletonBranchCount(narrowCore.pixels, input.frameWidth);
+  const likelihood = classifyComponent({
+    area,
+    majorAxisLength,
+    minorAxisLength: area / Math.max(1, majorAxisLength),
+    elongation: majorAxisLength / Math.max(1, area / Math.max(1, majorAxisLength)),
+    averageWidth,
+    widthVariance,
+    edgeSharpness,
+    edgeDensity,
+    localContrast: averageDelta - input.threshold,
+    gradientMagnitude,
+    solidity,
+    compactness,
+    interiorBrightnessVariance: deltaVariance,
+    boundaryBlur: clamp01(1 - edgeSharpness / 72),
+    darkeningPolarity,
+    skeletonLength,
+    skeletonBranchCount,
+    boardOverlapRatio: roiPixels / area,
+    bboxAreaRatio: bboxArea / Math.max(1, input.frameWidth * input.frameHeight),
+  });
+  const brightCoreDartLikelihood = narrowCore.isBrightCore
+    ? clamp01(narrowCore.majorAxisLength / 8) * 0.55
+    : 0;
+  const dartLikelihood = Math.max(likelihood.dartLikelihood, brightCoreDartLikelihood);
+  const shadowLikelihood = narrowCore.isBrightCore
+    ? clamp01(likelihood.shadowLikelihood - brightCoreDartLikelihood * 0.45)
+    : likelihood.shadowLikelihood;
+  const rejectionReason =
+    narrowCore.isBrightCore && narrowCore.majorAxisLength >= 5.5
+      ? null
+      : likelihood.rejectionReason;
 
   return {
     id: input.id,
@@ -405,9 +514,26 @@ function createComponentFeature(input: {
       y: centroid.y / Math.max(1, input.frameHeight - 1),
     },
     maxDelta: Math.max(...input.pixels.map((pixel) => pixel.delta)),
-    averageDelta: input.pixels.reduce((total, pixel) => total + pixel.delta, 0) / area,
+    averageDelta,
     persistenceCount: 1,
     boardOverlapRatio: roiPixels / area,
+    averageWidth,
+    widthVariance,
+    edgeSharpness,
+    edgeDensity,
+    localContrast: averageDelta - input.threshold,
+    gradientMagnitude,
+    solidity,
+    compactness,
+    interiorBrightnessVariance: deltaVariance,
+    boundaryBlur: clamp01(1 - edgeSharpness / 72),
+    darkeningPolarity,
+    skeletonLength,
+    skeletonBranchCount,
+    dartLikelihood,
+    shadowLikelihood,
+    rejectionReason,
+    narrowCore,
     axis: {
       start: {
         x: minProjection.pixel.x / Math.max(1, input.frameWidth - 1),
@@ -419,6 +545,302 @@ function createComponentFeature(input: {
       },
     },
     pixels: input.pixels,
+  };
+}
+
+function createPixelSet(pixels: { x: number; y: number }[], frameWidth: number) {
+  return new Set(pixels.map((pixel) => pixel.y * frameWidth + pixel.x));
+}
+
+function isBoundaryPixel(
+  pixel: { x: number; y: number },
+  pixelSet: Set<number>,
+  frameWidth: number,
+  frameHeight: number,
+) {
+  for (const [dx, dy] of neighborOffsets) {
+    const x = pixel.x + dx;
+    const y = pixel.y + dy;
+    if (x < 0 || y < 0 || x >= frameWidth || y >= frameHeight) {
+      return true;
+    }
+    if (!pixelSet.has(y * frameWidth + x)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function getAverageBoundarySharpness(
+  boundaryPixels: { x: number; y: number; delta: number }[],
+  deltas: Uint8Array,
+  frameWidth: number,
+  frameHeight: number,
+) {
+  if (boundaryPixels.length === 0) {
+    return 0;
+  }
+  let total = 0;
+  for (const pixel of boundaryPixels) {
+    let outsideTotal = 0;
+    let outsideCount = 0;
+    for (const [dx, dy] of neighborOffsets) {
+      const x = pixel.x + dx;
+      const y = pixel.y + dy;
+      if (x < 0 || y < 0 || x >= frameWidth || y >= frameHeight) {
+        continue;
+      }
+      outsideTotal += deltas[y * frameWidth + x];
+      outsideCount += 1;
+    }
+    const outsideAverage = outsideCount === 0 ? 0 : outsideTotal / outsideCount;
+    total += Math.max(0, pixel.delta - outsideAverage);
+  }
+  return total / boundaryPixels.length;
+}
+
+function getAverageGradientMagnitude(
+  pixels: { x: number; y: number }[],
+  deltas: Uint8Array,
+  frameWidth: number,
+  frameHeight: number,
+) {
+  if (pixels.length === 0) {
+    return 0;
+  }
+  let total = 0;
+  for (const pixel of pixels) {
+    const left = deltas[pixel.y * frameWidth + Math.max(0, pixel.x - 1)];
+    const right = deltas[pixel.y * frameWidth + Math.min(frameWidth - 1, pixel.x + 1)];
+    const top = deltas[Math.max(0, pixel.y - 1) * frameWidth + pixel.x];
+    const bottom = deltas[Math.min(frameHeight - 1, pixel.y + 1) * frameWidth + pixel.x];
+    total += Math.sqrt((right - left) ** 2 + (bottom - top) ** 2);
+  }
+  return total / pixels.length;
+}
+
+function variance(values: number[]) {
+  if (values.length === 0) {
+    return 0;
+  }
+  const average = values.reduce((total, value) => total + value, 0) / values.length;
+  return values.reduce((total, value) => total + (value - average) ** 2, 0) / values.length;
+}
+
+function calculateWidthVariance(
+  pixels: { x: number; y: number }[],
+  centroid: { x: number; y: number },
+  axisVector: { x: number; y: number },
+) {
+  const buckets = new Map<number, number[]>();
+  const normal = { x: -axisVector.y, y: axisVector.x };
+  for (const pixel of pixels) {
+    const projection = Math.round(
+      (pixel.x - centroid.x) * axisVector.x + (pixel.y - centroid.y) * axisVector.y,
+    );
+    const lateral = Math.abs((pixel.x - centroid.x) * normal.x + (pixel.y - centroid.y) * normal.y);
+    const values = buckets.get(projection) ?? [];
+    values.push(lateral);
+    buckets.set(projection, values);
+  }
+  const widths = Array.from(buckets.values()).map((values) => Math.max(...values) * 2 + 1);
+  return variance(widths);
+}
+
+function getDarkeningPolarity(
+  pixels: { x: number; y: number }[],
+  input: BasicImageDifferenceInput,
+  frameWidth: number,
+) {
+  if (pixels.length === 0) {
+    return 0;
+  }
+  let total = 0;
+  for (const pixel of pixels) {
+    const index = pixel.y * frameWidth + pixel.x;
+    total += input.thrownFrame.pixels[index] - input.baselineFrame.pixels[index];
+  }
+  return total / pixels.length / 255;
+}
+
+function extractNarrowCore(input: {
+  pixels: { x: number; y: number; delta: number }[];
+  frameWidth: number;
+  frameHeight: number;
+  sourceInput: BasicImageDifferenceInput;
+  averageDelta: number;
+  maxDelta: number;
+}): DartComponentFeature['narrowCore'] {
+  const coreThreshold = Math.max(
+    input.averageDelta + Math.sqrt(variance(input.pixels.map((pixel) => pixel.delta))) * 0.45,
+    input.maxDelta * 0.62,
+  );
+  const brightCorePixels = input.pixels.filter((pixel) => {
+    const index = pixel.y * input.frameWidth + pixel.x;
+    return (
+      pixel.delta >= coreThreshold * 0.72 &&
+      input.sourceInput.thrownFrame.pixels[index] - input.sourceInput.baselineFrame.pixels[index] >
+        18
+    );
+  });
+  const corePixels =
+    brightCorePixels.length >= 6
+      ? brightCorePixels
+      : input.pixels.filter((pixel) => pixel.delta >= coreThreshold);
+  if (corePixels.length < 6) {
+    return {
+      pixels: corePixels,
+      boundingBox: null,
+      axis: null,
+      majorAxisLength: 0,
+      isBrightCore: brightCorePixels.length >= 6,
+    };
+  }
+  const centroid = {
+    x: corePixels.reduce((total, pixel) => total + pixel.x, 0) / corePixels.length,
+    y: corePixels.reduce((total, pixel) => total + pixel.y, 0) / corePixels.length,
+  };
+  const axis = fitMajorAxis(corePixels, centroid);
+  const projections = corePixels.map((pixel) => ({
+    pixel,
+    projection: (pixel.x - centroid.x) * axis.vector.x + (pixel.y - centroid.y) * axis.vector.y,
+  }));
+  const minProjection = projections.reduce((best, item) =>
+    item.projection < best.projection ? item : best,
+  );
+  const maxProjection = projections.reduce((best, item) =>
+    item.projection > best.projection ? item : best,
+  );
+  const majorAxisLength = distance(minProjection.pixel, maxProjection.pixel);
+  const minX = Math.min(...corePixels.map((pixel) => pixel.x));
+  const maxX = Math.max(...corePixels.map((pixel) => pixel.x));
+  const minY = Math.min(...corePixels.map((pixel) => pixel.y));
+  const maxY = Math.max(...corePixels.map((pixel) => pixel.y));
+  return {
+    pixels: corePixels,
+    boundingBox: {
+      x: minX / input.frameWidth,
+      y: minY / input.frameHeight,
+      width: (maxX - minX + 1) / input.frameWidth,
+      height: (maxY - minY + 1) / input.frameHeight,
+    },
+    axis: {
+      start: {
+        x: minProjection.pixel.x / Math.max(1, input.frameWidth - 1),
+        y: minProjection.pixel.y / Math.max(1, input.frameHeight - 1),
+      },
+      end: {
+        x: maxProjection.pixel.x / Math.max(1, input.frameWidth - 1),
+        y: maxProjection.pixel.y / Math.max(1, input.frameHeight - 1),
+      },
+    },
+    majorAxisLength,
+    isBrightCore: brightCorePixels.length >= 6,
+  };
+}
+
+function estimateSkeletonBranchCount(pixels: { x: number; y: number }[], frameWidth: number) {
+  if (pixels.length === 0) {
+    return 0;
+  }
+  const pixelSet = createPixelSet(pixels, frameWidth);
+  let branches = 0;
+  for (const pixel of pixels) {
+    let neighbors = 0;
+    for (let dy = -1; dy <= 1; dy += 1) {
+      for (let dx = -1; dx <= 1; dx += 1) {
+        if (dx === 0 && dy === 0) {
+          continue;
+        }
+        if (pixelSet.has((pixel.y + dy) * frameWidth + pixel.x + dx)) {
+          neighbors += 1;
+        }
+      }
+    }
+    if (neighbors >= 4) {
+      branches += 1;
+    }
+  }
+  return branches;
+}
+
+function classifyComponent(input: {
+  area: number;
+  majorAxisLength: number;
+  minorAxisLength: number;
+  elongation: number;
+  averageWidth: number;
+  widthVariance: number;
+  edgeSharpness: number;
+  edgeDensity: number;
+  localContrast: number;
+  gradientMagnitude: number;
+  solidity: number;
+  compactness: number;
+  interiorBrightnessVariance: number;
+  boundaryBlur: number;
+  darkeningPolarity: number;
+  skeletonLength: number;
+  skeletonBranchCount: number;
+  boardOverlapRatio: number;
+  bboxAreaRatio: number;
+}) {
+  const elongationScore = clamp01((input.elongation - 2.2) / 2.4);
+  const highElongationBonus = clamp01((input.elongation - 4) / 2);
+  const coreLengthScore = clamp01((input.skeletonLength - 10) / 28);
+  const widthScore = clamp01(1 - (input.averageWidth - 2.5) / 8);
+  const widthVarianceScore = clamp01(1 - input.widthVariance / 8);
+  const sharpnessScore = clamp01(input.edgeSharpness / 90);
+  const contrastScore = clamp01(input.localContrast / 120);
+  const overlapScore = clamp01(input.boardOverlapRatio);
+  const branchPenalty = clamp01(input.skeletonBranchCount / 8);
+  const dartLikelihood = clamp01(
+    elongationScore * 0.24 +
+      highElongationBonus * 0.1 +
+      coreLengthScore * 0.22 +
+      widthScore * 0.12 +
+      widthVarianceScore * 0.08 +
+      sharpnessScore * 0.1 +
+      contrastScore * 0.08 +
+      overlapScore * 0.06 -
+      branchPenalty * 0.12,
+  );
+
+  const lowElongationShadow = clamp01((2.2 - input.elongation) / 1.2);
+  const broadScore = clamp01((input.averageWidth - 5.8) / 8);
+  const blurScore = clamp01(input.boundaryBlur);
+  const solidBlobScore = clamp01((input.solidity - 0.52) / 0.35);
+  const compactScore = clamp01((input.compactness - 0.18) / 0.4);
+  const darkShadowScore = clamp01((-input.darkeningPolarity - 0.02) / 0.18);
+  const lowContrastScore = clamp01(1 - input.gradientMagnitude / 72);
+  const areaScore = clamp01((input.bboxAreaRatio - 0.002) / 0.05);
+  const shadowLikelihood = clamp01(
+    lowElongationShadow * 0.24 +
+      broadScore * 0.16 +
+      blurScore * 0.12 +
+      solidBlobScore * 0.14 +
+      compactScore * 0.08 +
+      darkShadowScore * 0.12 +
+      lowContrastScore * 0.08 +
+      areaScore * 0.06 +
+      branchPenalty * 0.08 -
+      coreLengthScore * 0.14 -
+      sharpnessScore * 0.08,
+  );
+
+  let rejectionReason: string | null = null;
+  if (input.elongation < 2.2 && coreLengthScore < 0.25) {
+    rejectionReason = 'LOW_ELONGATION_SHADOW';
+  } else if (shadowLikelihood >= 0.62 && dartLikelihood < 0.5) {
+    rejectionReason = 'SHADOW_LIKELY';
+  } else if (input.averageWidth > 12 && coreLengthScore < 0.35) {
+    rejectionReason = 'BROAD_BLURRED_COMPONENT';
+  }
+
+  return {
+    dartLikelihood,
+    shadowLikelihood,
+    rejectionReason,
   };
 }
 
@@ -450,8 +872,9 @@ function createTipCandidates(
   component: DartComponentFeature,
   threshold: number,
 ): TipCandidateFeature[] {
-  const endpoints = [component.axis.start, component.axis.end];
-  const otherEndpoints = [component.axis.end, component.axis.start];
+  const candidateAxis = component.narrowCore.axis ?? component.axis;
+  const endpoints = [candidateAxis.start, candidateAxis.end];
+  const otherEndpoints = [candidateAxis.end, candidateAxis.start];
   const dimensions = {
     containerWidth: input.thrownFrame.width,
     containerHeight: input.thrownFrame.height,
@@ -473,14 +896,21 @@ function createTipCandidates(
           ? 0
           : Math.min(0.12, boardScore.distanceToSegmentBoundaryDeg / 75);
       const deltaScore = clamp01((component.averageDelta - threshold) / 128);
-      const elongationScore = clamp01((component.elongation - 1.4) / 5);
+      const elongationScore = clamp01((component.elongation - 2.2) / 4);
+      const coreScore = clamp01(component.skeletonLength / 32);
       const areaScore = clamp01(component.area / 90);
       const overlapScore = clamp01(component.boardOverlapRatio);
+      const shadowPenalty = component.narrowCore.isBrightCore
+        ? component.shadowLikelihood * 0.16
+        : component.shadowLikelihood * 0.34;
       const score =
         0.18 * deltaScore +
-        0.26 * elongationScore +
-        0.14 * areaScore +
-        0.18 * overlapScore +
+        0.18 * elongationScore +
+        0.16 * coreScore +
+        0.08 * areaScore +
+        0.16 * overlapScore +
+        component.dartLikelihood * 0.26 -
+        shadowPenalty +
         insideBonus +
         radialTipBonus +
         boundaryBonus;
@@ -493,6 +923,9 @@ function createTipCandidates(
           boardScore.withinDoubleOuter ? 'inside double outer' : 'outside double outer',
           radialTipBonus > 0 ? 'component extends outward' : 'opposite endpoint retained',
           `elongation ${component.elongation.toFixed(2)}`,
+          `dart ${component.dartLikelihood.toFixed(2)}`,
+          `shadow ${component.shadowLikelihood.toFixed(2)}`,
+          component.narrowCore.axis ? 'narrow core axis' : 'component axis',
         ].join(' / '),
         component,
         boardScore,
@@ -512,12 +945,81 @@ function rankTipCandidates(tips: TipCandidateFeature[]) {
   });
 }
 
+function isDartCandidateComponent(component: DartComponentFeature) {
+  const hasUsableCore =
+    component.narrowCore.axis != null &&
+    component.narrowCore.majorAxisLength >= 8 &&
+    component.skeletonLength >= 8;
+  const hasBrightCore =
+    component.narrowCore.isBrightCore &&
+    component.narrowCore.axis != null &&
+    component.narrowCore.majorAxisLength >= 5.5;
+  const isSharpNarrowFragment =
+    component.skeletonLength >= 4 &&
+    component.averageWidth <= 4.4 &&
+    component.edgeSharpness >= 28 &&
+    component.shadowLikelihood < 0.5;
+  if (
+    component.averageWidth >= 7 &&
+    component.shadowLikelihood >= 0.55 &&
+    component.dartLikelihood < 0.18 &&
+    component.edgeSharpness < 42
+  ) {
+    return false;
+  }
+  if (component.rejectionReason && !hasUsableCore && !hasBrightCore && !isSharpNarrowFragment) {
+    return false;
+  }
+  if (component.shadowLikelihood >= 0.66 && component.dartLikelihood < 0.58) {
+    return false;
+  }
+  if (component.elongation < 2.2 && !hasUsableCore && !hasBrightCore && !isSharpNarrowFragment) {
+    return false;
+  }
+  if (
+    component.elongation < 3 &&
+    component.dartLikelihood < 0.24 &&
+    !hasUsableCore &&
+    !hasBrightCore &&
+    !isSharpNarrowFragment
+  ) {
+    return false;
+  }
+  return (
+    component.boardOverlapRatio >= 0.35 &&
+    (component.dartLikelihood >= 0.24 || hasUsableCore || hasBrightCore || isSharpNarrowFragment)
+  );
+}
+
+function suppressNearbyTips(tips: TipCandidateFeature[]) {
+  const selected: TipCandidateFeature[] = [];
+  for (const tip of tips) {
+    const duplicate = selected.some((selectedTip) => {
+      const normalizedDistance = distance(tip, selectedTip);
+      const sameComponent = tip.component.id === selectedTip.component.id;
+      const sameScoringCell =
+        tip.boardScore.segmentNumber === selectedTip.boardScore.segmentNumber &&
+        tip.boardScore.multiplier === selectedTip.boardScore.multiplier;
+      return (
+        normalizedDistance < 0.045 ||
+        (sameComponent && normalizedDistance < 0.12) ||
+        sameScoringCell
+      );
+    });
+    if (!duplicate) {
+      selected.push(tip);
+    }
+  }
+  return selected;
+}
+
 function createCandidatesFromTips(
   input: BasicImageDifferenceInput,
   tips: TipCandidateFeature[],
   metadata: {
     changedPixelRatio: number;
     globalBoundingBox: ComponentBoundingBox | null;
+    rejectedShadowComponents: DartComponentFeature[];
     processingMs: number;
   },
 ) {
@@ -558,6 +1060,7 @@ function createCandidateFromTip(input: {
   metadata: {
     changedPixelRatio: number;
     globalBoundingBox: ComponentBoundingBox | null;
+    rejectedShadowComponents: DartComponentFeature[];
     processingMs: number;
   };
   engine: DetectionEngine;
@@ -601,25 +1104,41 @@ function createCandidateFromTip(input: {
     type: 'detection_candidate',
     processingMs: input.metadata.processingMs,
     componentBoundingBox: input.tip.component.boundingBox,
-    fittedAxis: input.tip.component.axis,
+    narrowCoreBoundingBox: input.tip.component.narrowCore.boundingBox,
+    rejectedShadowComponents: input.metadata.rejectedShadowComponents.map((component) => ({
+      boundingBox: component.boundingBox,
+      shadowLikelihood: component.shadowLikelihood,
+      rejectionReason: component.rejectionReason ?? 'SHADOW_LIKELY',
+    })),
+    fittedAxis: input.tip.component.narrowCore.axis ?? input.tip.component.axis,
     tipCandidates: [
       {
-        x: input.tip.component.axis.start.x,
-        y: input.tip.component.axis.start.y,
-        score: input.tip.component.axis.start.x === input.tip.x ? input.tip.score : 0,
+        x: (input.tip.component.narrowCore.axis ?? input.tip.component.axis).start.x,
+        y: (input.tip.component.narrowCore.axis ?? input.tip.component.axis).start.y,
+        score:
+          (input.tip.component.narrowCore.axis ?? input.tip.component.axis).start.x ===
+            input.tip.x &&
+          (input.tip.component.narrowCore.axis ?? input.tip.component.axis).start.y === input.tip.y
+            ? input.tip.score
+            : 0,
         reason:
-          input.tip.component.axis.start.x === input.tip.x &&
-          input.tip.component.axis.start.y === input.tip.y
+          (input.tip.component.narrowCore.axis ?? input.tip.component.axis).start.x ===
+            input.tip.x &&
+          (input.tip.component.narrowCore.axis ?? input.tip.component.axis).start.y === input.tip.y
             ? input.tip.reason
             : 'opposite axis endpoint',
       },
       {
-        x: input.tip.component.axis.end.x,
-        y: input.tip.component.axis.end.y,
-        score: input.tip.component.axis.end.x === input.tip.x ? input.tip.score : 0,
+        x: (input.tip.component.narrowCore.axis ?? input.tip.component.axis).end.x,
+        y: (input.tip.component.narrowCore.axis ?? input.tip.component.axis).end.y,
+        score:
+          (input.tip.component.narrowCore.axis ?? input.tip.component.axis).end.x === input.tip.x &&
+          (input.tip.component.narrowCore.axis ?? input.tip.component.axis).end.y === input.tip.y
+            ? input.tip.score
+            : 0,
         reason:
-          input.tip.component.axis.end.x === input.tip.x &&
-          input.tip.component.axis.end.y === input.tip.y
+          (input.tip.component.narrowCore.axis ?? input.tip.component.axis).end.x === input.tip.x &&
+          (input.tip.component.narrowCore.axis ?? input.tip.component.axis).end.y === input.tip.y
             ? input.tip.reason
             : 'opposite axis endpoint',
       },
@@ -638,6 +1157,22 @@ function createCandidateFromTip(input: {
       averageDelta: input.tip.component.averageDelta,
       persistenceCount: input.tip.component.persistenceCount,
       boardOverlapRatio: input.tip.component.boardOverlapRatio,
+      averageWidth: input.tip.component.averageWidth,
+      widthVariance: input.tip.component.widthVariance,
+      edgeSharpness: input.tip.component.edgeSharpness,
+      edgeDensity: input.tip.component.edgeDensity,
+      localContrast: input.tip.component.localContrast,
+      gradientMagnitude: input.tip.component.gradientMagnitude,
+      solidity: input.tip.component.solidity,
+      compactness: input.tip.component.compactness,
+      interiorBrightnessVariance: input.tip.component.interiorBrightnessVariance,
+      boundaryBlur: input.tip.component.boundaryBlur,
+      darkeningPolarity: input.tip.component.darkeningPolarity,
+      skeletonLength: input.tip.component.skeletonLength,
+      skeletonBranchCount: input.tip.component.skeletonBranchCount,
+      dartLikelihood: input.tip.component.dartLikelihood,
+      shadowLikelihood: input.tip.component.shadowLikelihood,
+      rejectionReason: input.tip.component.rejectionReason,
       tipSelectionReason: input.tip.reason,
     },
   };
@@ -645,8 +1180,11 @@ function createCandidateFromTip(input: {
 
 function calculateConfidence(tip: TipCandidateFeature, offset: number) {
   const component = tip.component;
-  const elongation = clamp01((component.elongation - 1.4) / 5);
-  const area = clamp01(component.area / 100);
+  const elongation = clamp01((component.elongation - 2.2) / 3.8);
+  const core = clamp01(component.skeletonLength / 34);
+  const widthConsistency = clamp01(1 - component.widthVariance / 9);
+  const sharpness = clamp01(component.edgeSharpness / 90);
+  const width = clamp01(1 - (component.averageWidth - 2.2) / 8);
   const delta = clamp01(component.averageDelta / 180);
   const overlap = clamp01(component.boardOverlapRatio);
   const boundary =
@@ -655,25 +1193,38 @@ function calculateConfidence(tip: TipCandidateFeature, offset: number) {
       : clamp01(tip.boardScore.distanceToSegmentBoundaryDeg / 9);
   const inside = tip.boardScore.withinDoubleOuter ? 1 : 0;
   return clamp01(
-    0.16 +
-      elongation * 0.22 +
-      area * 0.12 +
-      delta * 0.18 +
-      overlap * 0.18 +
+    0.08 +
+      component.dartLikelihood * 0.34 +
+      elongation * 0.12 +
+      core * 0.14 +
+      widthConsistency * 0.08 +
+      sharpness * 0.08 +
+      width * 0.06 +
+      delta * 0.12 +
+      overlap * 0.1 +
       boundary * 0.08 +
-      inside * 0.12 -
+      inside * 0.1 -
+      component.shadowLikelihood * 0.32 -
       offset,
   );
 }
 
 function dedupeCandidates(candidates: DetectionCandidate[]) {
-  const seen = new Set<string>();
+  const selected: DetectionCandidate[] = [];
   return candidates.filter((candidate) => {
-    const key = `${candidate.segment}-${candidate.multiplier}-${candidate.normalizedX.toFixed(3)}-${candidate.normalizedY.toFixed(3)}`;
-    if (seen.has(key)) {
+    const duplicate = selected.some((existing) => {
+      const normalizedDistance = distance(
+        { x: candidate.normalizedX, y: candidate.normalizedY },
+        { x: existing.normalizedX, y: existing.normalizedY },
+      );
+      const sameScore =
+        candidate.segment === existing.segment && candidate.multiplier === existing.multiplier;
+      return normalizedDistance < 0.045 || sameScore;
+    });
+    if (duplicate) {
       return false;
     }
-    seen.add(key);
+    selected.push(candidate);
     return true;
   });
 }
