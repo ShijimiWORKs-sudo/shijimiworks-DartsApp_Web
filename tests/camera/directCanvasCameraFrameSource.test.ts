@@ -21,8 +21,10 @@ test('direct canvas frame source captures from existing video without opening an
     assert.equal(frame.sourceKind, 'direct-canvas');
     assert.equal(frame.width, 320);
     assert.equal(frame.height, 180);
-    assert.equal(frame.sourceFrame?.width, 640);
-    assert.equal(frame.sourceFrame?.height, 360);
+    assert.equal(frame.sourceFrame?.width, 1280);
+    assert.equal(frame.sourceFrame?.height, 720);
+    assert.equal(frame.capturedWidth, 1280);
+    assert.equal(frame.capturedHeight, 720);
     assert.equal(source.diagnostics.lastSource, 'direct-canvas');
   } finally {
     restore();

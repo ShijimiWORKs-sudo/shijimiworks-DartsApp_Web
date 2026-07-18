@@ -1,6 +1,6 @@
 import { CameraView } from 'expo-camera';
-import type { RefObject, ReactNode } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { useEffect, useRef, type RefObject, type ReactNode } from 'react';
+import { Platform, StyleSheet, Text, View } from 'react-native';
 
 import { CameraPermissionCard } from './CameraPermissionCard';
 import { BoardCalibrationOverlay } from './BoardCalibrationOverlay';
@@ -51,19 +51,24 @@ export function CameraPreviewSurface({
   onScorePoint,
 }: CameraPreviewSurfaceProps) {
   const hasCameraPermission = cameraSession.permissionState === 'granted';
+  const useWebMediaStream = Platform.OS === 'web';
 
   return (
     <View style={styles.previewWrap}>
       <View style={styles.cameraFrame} testID="camera-preview-surface">
         <View style={[StyleSheet.absoluteFill, profile.previewMirrored && styles.mirroredPreview]}>
           {hasCameraPermission && cameraSession.shouldMountCamera ? (
-            <CameraView
-              ref={cameraRef}
-              style={StyleSheet.absoluteFill}
-              facing={cameraSession.facing}
-              onCameraReady={cameraSession.markCameraReady}
-              onMountError={cameraSession.handleMountError}
-            />
+            useWebMediaStream ? (
+              <WebCameraPreview cameraSession={cameraSession} />
+            ) : (
+              <CameraView
+                ref={cameraRef}
+                style={StyleSheet.absoluteFill}
+                facing={cameraSession.facing}
+                onCameraReady={cameraSession.markCameraReady}
+                onMountError={cameraSession.handleMountError}
+              />
+            )
           ) : (
             <View style={styles.fixtureBoard}>
               <View style={styles.fixtureOuter} />
@@ -106,6 +111,63 @@ export function CameraPreviewSurface({
     </View>
   );
 }
+
+function WebCameraPreview({
+  cameraSession,
+}: {
+  cameraSession: ReturnType<typeof useCameraSession>;
+}) {
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const { markCameraReady, recordWebVideoMetrics, setWebVideoElement, webStream } = cameraSession;
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) {
+      return;
+    }
+    setWebVideoElement(video);
+    video.srcObject = webStream;
+
+    return () => {
+      setWebVideoElement(null);
+      video.srcObject = null;
+    };
+  }, [setWebVideoElement, webStream]);
+
+  const handleReady = () => {
+    const video = videoRef.current;
+    if (!video) {
+      return;
+    }
+    const frameRate = webStream?.getVideoTracks()[0]?.getSettings?.().frameRate;
+    recordWebVideoMetrics({
+      videoWidth: video.videoWidth,
+      videoHeight: video.videoHeight,
+      frameRate: typeof frameRate === 'number' ? frameRate : null,
+    });
+    markCameraReady();
+  };
+
+  return (
+    <video
+      ref={videoRef}
+      autoPlay
+      muted
+      playsInline
+      onLoadedMetadata={handleReady}
+      onCanPlay={handleReady}
+      style={webVideoStyle}
+    />
+  );
+}
+
+const webVideoStyle = {
+  position: 'absolute',
+  inset: 0,
+  width: '100%',
+  height: '100%',
+  objectFit: 'cover',
+} as const;
 
 const styles = StyleSheet.create({
   previewWrap: {

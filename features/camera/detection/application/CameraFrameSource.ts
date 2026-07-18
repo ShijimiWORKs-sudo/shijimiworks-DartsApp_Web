@@ -79,8 +79,8 @@ export const throwDetectionThresholds = {
   baselineNoiseMaxRatio: 0.025,
   baselineBrightnessVarianceMax: 450,
   baselineNoiseThresholdMargin: 14,
-  monitorMaxSize: 160,
-  analysisMaxSize: 320,
+  monitorMaxSize: 320,
+  analysisMaxSize: 640,
   persistentRoiRadiusMultiplier: 1.1,
 } as const;
 

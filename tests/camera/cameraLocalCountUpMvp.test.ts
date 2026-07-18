@@ -228,6 +228,15 @@ test('camera COUNT-UP monitor uses two stage resolution and treats no significan
   assert.match(play, /analysisFrameMaxSize = throwDetectionThresholds\.analysisMaxSize/);
   assert.match(play, /maxSize: monitorFrameMaxSize/);
   assert.match(play, /maxSize: analysisFrameMaxSize/);
+  assert.match(play, /requested resolution/);
+  assert.match(play, /actual video/);
+  assert.match(play, /source resolution/);
+  assert.match(play, /monitoring resolution/);
+  assert.match(play, /component resolution/);
+  assert.match(play, /tip refinement resolution/);
+  assert.match(play, /frame rate/);
+  assert.match(play, /frame source/);
+  assert.match(play, /fallback reason/);
   assert.match(play, /result\.reason === 'NO_SIGNIFICANT_CHANGE' && !options\?\.manual/);
   assert.match(play, /setDetectionState\('waiting_throw'\)/);
   assert.match(play, /投擲を待機しています。/);
@@ -251,6 +260,7 @@ test('camera COUNT-UP monitor uses stable frame source and in-flight capture gua
 
   assert.match(play, /capturePictureRef\.current = cameraSession\.capturePicture/);
   assert.match(play, /frameSourceRef\.current = new DirectCanvasCameraFrameSource/);
+  assert.match(play, /cameraSession\.getWebVideoElement/);
   assert.match(play, /document\.querySelector\('video'\)/);
   assert.match(
     play,

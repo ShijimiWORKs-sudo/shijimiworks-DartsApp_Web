@@ -1,6 +1,6 @@
 import { useFocusEffect } from 'expo-router';
 import { CameraView, useCameraPermissions, type CameraCapturedPicture } from 'expo-camera';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Platform } from 'react-native';
 
 import {
@@ -17,6 +17,11 @@ import type {
   CameraPermissionState,
   CapturedBoardImage,
 } from '../domain/types';
+import {
+  mergeWebVideoMetrics,
+  openPreferredWebCameraStream,
+  type WebCameraStreamDiagnostics,
+} from './WebCameraStream';
 
 type CameraSessionState = {
   availability: CameraAvailabilityState;
@@ -28,11 +33,20 @@ type CameraSessionState = {
   shouldMountCamera: boolean;
   canTakePicture: boolean;
   errorMessage: string | null;
+  webStream: MediaStream | null;
+  webDiagnostics: WebCameraStreamDiagnostics | null;
   requestCameraAccess: () => Promise<void>;
   markCameraReady: () => void;
   handleMountError: () => void;
   switchFacing: () => void;
   capturePicture: (camera: CameraView | null) => Promise<CapturedBoardImage | null>;
+  setWebVideoElement: (video: HTMLVideoElement | null) => void;
+  getWebVideoElement: () => HTMLVideoElement | null;
+  recordWebVideoMetrics: (input: {
+    videoWidth: number;
+    videoHeight: number;
+    frameRate?: number | null;
+  }) => void;
 };
 
 export function useCameraSession(): CameraSessionState {
@@ -43,7 +57,12 @@ export function useCameraSession(): CameraSessionState {
   const [isReady, setIsReady] = useState(false);
   const [isCapturing, setIsCapturing] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [webStream, setWebStream] = useState<MediaStream | null>(null);
+  const [webDiagnostics, setWebDiagnostics] = useState<WebCameraStreamDiagnostics | null>(null);
+  const webStreamRef = useRef<MediaStream | null>(null);
+  const webVideoElementRef = useRef<HTMLVideoElement | null>(null);
   const platform = getCameraRuntimePlatform(Platform.OS);
+  const isWeb = Platform.OS === 'web';
 
   useFocusEffect(
     useCallback(() => {
@@ -63,6 +82,10 @@ export function useCameraSession(): CameraSessionState {
         setIsFocused(false);
         setIsReady(false);
         setIsCapturing(false);
+        stopWebStream(webStreamRef.current);
+        webStreamRef.current = null;
+        webVideoElementRef.current = null;
+        setWebStream(null);
       };
     }, []),
   );
@@ -73,6 +96,53 @@ export function useCameraSession(): CameraSessionState {
   );
   const shouldMountCamera = isFocused && permissionState === 'granted';
   const canTakePicture = shouldMountCamera && isReady && !isCapturing;
+
+  useEffect(() => {
+    if (!isWeb) {
+      return;
+    }
+
+    if (!shouldMountCamera) {
+      stopWebStream(webStreamRef.current);
+      webStreamRef.current = null;
+      setWebStream(null);
+      setIsReady(false);
+      return;
+    }
+
+    let cancelled = false;
+    setIsReady(false);
+    setErrorMessage(null);
+    stopWebStream(webStreamRef.current);
+    webStreamRef.current = null;
+    setWebStream(null);
+
+    void openPreferredWebCameraStream({ facing })
+      .then(({ stream, diagnostics }) => {
+        if (cancelled) {
+          stopWebStream(stream);
+          return;
+        }
+        stopWebStream(webStreamRef.current);
+        webStreamRef.current = stream;
+        setWebStream(stream);
+        setWebDiagnostics(diagnostics);
+      })
+      .catch((error) => {
+        if (cancelled) {
+          return;
+        }
+        console.warn('Web camera stream failed.', error);
+        setIsReady(false);
+        setErrorMessage(
+          'Webカメラを起動できませんでした。ブラウザまたは端末の設定を確認してください。',
+        );
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [facing, isWeb, shouldMountCamera]);
 
   const requestCameraAccess = useCallback(async () => {
     setErrorMessage(null);
@@ -99,6 +169,19 @@ export function useCameraSession(): CameraSessionState {
     setIsReady(false);
     setErrorMessage(null);
   }, []);
+
+  const setWebVideoElement = useCallback((video: HTMLVideoElement | null) => {
+    webVideoElementRef.current = video;
+  }, []);
+
+  const getWebVideoElement = useCallback(() => webVideoElementRef.current, []);
+
+  const recordWebVideoMetrics = useCallback(
+    (input: { videoWidth: number; videoHeight: number; frameRate?: number | null }) => {
+      setWebDiagnostics((current) => (current ? mergeWebVideoMetrics(current, input) : current));
+    },
+    [],
+  );
 
   const capturePicture = useCallback(
     async (camera: CameraView | null) => {
@@ -146,10 +229,21 @@ export function useCameraSession(): CameraSessionState {
     shouldMountCamera,
     canTakePicture,
     errorMessage,
+    webStream,
+    webDiagnostics,
     requestCameraAccess,
     markCameraReady,
     handleMountError,
     switchFacing,
     capturePicture,
+    setWebVideoElement,
+    getWebVideoElement,
+    recordWebVideoMetrics,
   };
+}
+
+function stopWebStream(stream: MediaStream | null) {
+  for (const track of stream?.getTracks?.() ?? []) {
+    track.stop();
+  }
 }

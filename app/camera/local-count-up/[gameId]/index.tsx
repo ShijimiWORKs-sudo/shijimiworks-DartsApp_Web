@@ -134,7 +134,8 @@ export default function CameraLocalCountUpPlayScreen() {
   if (!frameSourceRef.current) {
     frameSourceRef.current = new DirectCanvasCameraFrameSource({
       getVideoElement: () =>
-        typeof document === 'undefined' ? null : document.querySelector('video'),
+        cameraSession.getWebVideoElement?.() ??
+        (typeof document === 'undefined' ? null : document.querySelector('video')),
       fallbackCaptureImage: () => capturePictureRef.current(cameraRef.current),
     });
   }
@@ -1073,6 +1074,70 @@ export default function CameraLocalCountUpPlayScreen() {
             <View style={styles.statusGrid}>
               <InfoRow label="状態" value={formatDetectionState(detectionState)} />
               <InfoRow label="基準画像" value={baselineFrameId ? '取得済み' : '未取得'} />
+              <InfoRow
+                label="requested resolution"
+                value={cameraSession.webDiagnostics?.requestedResolution ?? '-'}
+              />
+              <InfoRow
+                label="actual video"
+                value={
+                  cameraSession.webDiagnostics?.actualVideoWidth &&
+                  cameraSession.webDiagnostics?.actualVideoHeight
+                    ? `${cameraSession.webDiagnostics.actualVideoWidth}×${cameraSession.webDiagnostics.actualVideoHeight}`
+                    : '-'
+                }
+              />
+              <InfoRow
+                label="source resolution"
+                value={
+                  baselineFrameRef.current?.sourceFrame
+                    ? `${baselineFrameRef.current.sourceFrame.width}×${baselineFrameRef.current.sourceFrame.height}`
+                    : baselineFrameRef.current?.capturedWidth &&
+                        baselineFrameRef.current?.capturedHeight
+                      ? `${baselineFrameRef.current.capturedWidth}×${baselineFrameRef.current.capturedHeight}`
+                      : '-'
+                }
+              />
+              <InfoRow
+                label="monitoring resolution"
+                value={`max ${monitorFrameMaxSize} / ${
+                  baselineMonitorFrameRef.current
+                    ? `${baselineMonitorFrameRef.current.width}×${baselineMonitorFrameRef.current.height}`
+                    : '-'
+                }`}
+              />
+              <InfoRow
+                label="component resolution"
+                value={`max ${analysisFrameMaxSize} / ${
+                  baselineFrameRef.current
+                    ? `${baselineFrameRef.current.width}×${baselineFrameRef.current.height}`
+                    : '-'
+                }`}
+              />
+              <InfoRow
+                label="tip refinement resolution"
+                value={
+                  sourceBaselineFrameRef.current
+                    ? `${sourceBaselineFrameRef.current.width}×${sourceBaselineFrameRef.current.height}`
+                    : '-'
+                }
+              />
+              <InfoRow
+                label="frame rate"
+                value={
+                  cameraSession.webDiagnostics?.frameRate
+                    ? `${cameraSession.webDiagnostics.frameRate}fps`
+                    : '-'
+                }
+              />
+              <InfoRow
+                label="frame source"
+                value={cameraSession.webDiagnostics?.frameSource ?? '-'}
+              />
+              <InfoRow
+                label="fallback reason"
+                value={cameraSession.webDiagnostics?.fallbackReason ?? '-'}
+              />
               <InfoRow label="source" value={baselineFrameRef.current?.sourceKind ?? '-'} />
               <InfoRow label="mime" value={baselineFrameRef.current?.mimeType ?? '-'} />
               <InfoRow
@@ -1139,10 +1204,6 @@ export default function CameraLocalCountUpPlayScreen() {
               <InfoRow
                 label="静止時間"
                 value={stableStartedAt ? `${Date.now() - stableStartedAt}ms` : '-'}
-              />
-              <InfoRow
-                label="analysis resolution"
-                value={`${monitorFrameMaxSize}/${analysisFrameMaxSize}`}
               />
               <InfoRow label="transition" value={lastTransitionReason} />
               <InfoRow label="処理時間" value={lastProcessingMs ? `${lastProcessingMs}ms` : '-'} />

@@ -149,14 +149,14 @@ test('multi-frame baseline uses median pixels and measures baseline noise', () =
 });
 
 test('resizeAnalysisFrame supports high resolution final analysis and monitor resolution', () => {
-  const source = createFrame('source', 640, 480);
+  const source = createFrame('source', 1920, 1080);
   const monitor = resizeAnalysisFrame(source, throwDetectionThresholds.monitorMaxSize);
   const analysis = resizeAnalysisFrame(source, throwDetectionThresholds.analysisMaxSize);
 
-  assert.equal(monitor.width, 160);
-  assert.equal(monitor.height, 120);
-  assert.equal(analysis.width, 320);
-  assert.equal(analysis.height, 240);
+  assert.equal(monitor.width, 320);
+  assert.equal(monitor.height, 180);
+  assert.equal(analysis.width, 640);
+  assert.equal(analysis.height, 360);
 });
 
 test('web image decode converts JPEG and PNG fixtures through canvas', async () => {

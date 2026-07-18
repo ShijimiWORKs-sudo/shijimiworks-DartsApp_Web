@@ -34,6 +34,25 @@ test('camera capture screen uses CameraView and useCameraPermissions through ses
   assert.match(sessionHook, /setIsReady\(false\)/);
 });
 
+test('web camera preview uses one MediaStream for preview and analysis', () => {
+  const preview = readRepoFile('components/camera/CameraPreviewSurface.tsx');
+  const sessionHook = readRepoFile('features/camera/ui/useCameraSession.ts');
+  const play = readRepoFile('app/camera/local-count-up/[gameId]/index.tsx');
+  const webStream = readRepoFile('features/camera/ui/WebCameraStream.ts');
+
+  assert.match(webStream, /\{ width: 1920, height: 1080 \}/);
+  assert.match(webStream, /\{ width: 1280, height: 720 \}/);
+  assert.match(webStream, /\{ width: 640, height: 480 \}/);
+  assert.match(webStream, /frameRate: \{ ideal: 30, max: 30 \}/);
+  assert.match(webStream, /webCameraResolutionFallbacks/);
+  assert.match(sessionHook, /openPreferredWebCameraStream\(\{ facing \}\)/);
+  assert.match(preview, /Platform\.OS === 'web'/);
+  assert.match(preview, /<WebCameraPreview cameraSession=\{cameraSession\} \/>/);
+  assert.match(preview, /video\.srcObject = webStream/);
+  assert.match(preview, /recordWebVideoMetrics/);
+  assert.match(play, /cameraSession\.getWebVideoElement/);
+});
+
 test('camera foundation does not persist images to sqlite or call recognition libraries', () => {
   const cameraSource = [
     readRepoFile('app/camera/index.tsx'),

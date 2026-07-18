@@ -69,10 +69,8 @@ export class DirectCanvasCameraFrameSource implements CameraFrameSource {
   }
 
   private captureVideoFrame(video: HTMLVideoElement, maxSize: number): CameraAnalysisFrame {
-    const sourceMaxSize = Math.max(maxSize, 640);
-    const sourceScale = Math.min(1, sourceMaxSize / Math.max(video.videoWidth, video.videoHeight));
-    const sourceWidth = Math.max(1, Math.round(video.videoWidth * sourceScale));
-    const sourceHeight = Math.max(1, Math.round(video.videoHeight * sourceScale));
+    const sourceWidth = Math.max(1, Math.round(video.videoWidth));
+    const sourceHeight = Math.max(1, Math.round(video.videoHeight));
     const sourceFrame = this.drawVideoToFrame(video, sourceWidth, sourceHeight);
     const scale = Math.min(1, maxSize / Math.max(sourceFrame.width, sourceFrame.height));
     const width = Math.max(1, Math.round(sourceFrame.width * scale));
